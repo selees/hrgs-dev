@@ -2,7 +2,7 @@
 
 Bluetooth,OSC,MIDI,Pulsoid
 
-#Booth
+## Booth
 
 [HeartRat OSC](https://selees824.booth.pm/items/5531594)
 
