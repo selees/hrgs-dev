@@ -1,0 +1,46 @@
+{
+  "name": "hrgs",
+  "version": "0.1.0",
+  "license": "MIT",
+  "scripts": {
+    "dev": "react-scripts start",
+    "build": "react-scripts build",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@reduxjs/toolkit": "^1.9.0",
+    "@tauri-apps/api": "^2.4.0",
+    "@tauri-apps/plugin-http": "^2.4.2",
+    "@tauri-apps/plugin-websocket": "~2",
+    "axios": "^1.8.4",
+    "lucide-react": "^0.485.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-redux": "^9.2.0",
+    "webmidi": "^3.1.12"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.1",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@types/uuid": "^10.0.0",
+    "@types/webmidi": "^2.1.0",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.3",
+    "react-scripts": "^5.0.1",
+    "tailwindcss": "3.4.14",
+    "typescript": "^5.8.2"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}
