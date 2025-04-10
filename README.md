@@ -1,7 +1,10 @@
-# Tauri + React + Typescript
+# HRGS
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+Bluetooth,OSC,MIDI,Pulsoid
+#Booth
 
-## Recommended IDE Setup
+[HeartRat OSC](https://selees824.booth.pm/items/5531594)
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## github
+
+- [Pulsoid VRchat World Integration](https://github.com/pulsoid-oss/pulsoid-vrchat-integration/) [HR-OSC](https://github.com/kamyu1537/hr-osc)
