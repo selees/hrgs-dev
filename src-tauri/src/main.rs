@@ -1,16 +1,16 @@
-#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+//#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 mod bluetooth;
-mod state;
-mod osc;
 mod midi;
+mod osc;
+mod state;
 
-use state::BluetoothState;
-use bluetooth::{scan_bluetooth_devices, connect_bluetooth, disconnect_bluetooth};
-use std::sync::{Arc, Mutex};
+use bluetooth::{connect_bluetooth, disconnect_bluetooth, scan_bluetooth_devices};
 use directories::UserDirs;
-use uuid::Uuid;
-use serde::{Serialize, Deserialize};
-use std::fs; // fs 모듈 임포트 추가
+use serde::{Deserialize, Serialize};
+use state::BluetoothState;
+use std::fs;
+use std::sync::{Arc, Mutex};
+use uuid::Uuid; // fs 모듈 임포트 추가
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 struct Config {
@@ -29,7 +29,9 @@ struct Config {
 #[tauri::command]
 async fn save_config(config: Config) -> Result<(), String> {
     let user_dirs = UserDirs::new().ok_or("Failed to get user directories")?;
-    let documents_path = user_dirs.document_dir().ok_or("Failed to get documents directory")?;
+    let documents_path = user_dirs
+        .document_dir()
+        .ok_or("Failed to get documents directory")?;
     let config_path = documents_path.join("config.json");
     fs::create_dir_all(documents_path).map_err(|e| e.to_string())?;
     let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
@@ -40,7 +42,9 @@ async fn save_config(config: Config) -> Result<(), String> {
 #[tauri::command]
 async fn load_config() -> Result<Config, String> {
     let user_dirs = UserDirs::new().ok_or("Failed to get user directories")?;
-    let documents_path = user_dirs.document_dir().ok_or("Failed to get documents directory")?;
+    let documents_path = user_dirs
+        .document_dir()
+        .ok_or("Failed to get documents directory")?;
     let config_path = documents_path.join("config.json");
 
     match fs::read_to_string(&config_path) {
@@ -62,7 +66,9 @@ async fn load_config() -> Result<Config, String> {
                 bluetooth_device_id: "".to_string(),
             };
 
-            save_config(default_config.clone()).await.map_err(|e| format!("Failed to save default config: {}", e))?;
+            save_config(default_config.clone())
+                .await
+                .map_err(|e| format!("Failed to save default config: {}", e))?;
 
             Ok(default_config)
         }
@@ -112,7 +118,9 @@ async fn get_websocket_url(widget_id: String) -> Result<String, String> {
         return Ok("".to_string());
     }
 
-    Ok(response_data.result.map_or("".to_string(), |r| r.ramiel_url))
+    Ok(response_data
+        .result
+        .map_or("".to_string(), |r| r.ramiel_url))
 }
 
 fn main() {

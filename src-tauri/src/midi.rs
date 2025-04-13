@@ -1,6 +1,6 @@
-use tauri::State;
 use midir::{MidiOutput, MidiOutputConnection};
 use std::sync::Mutex;
+use tauri::State;
 
 pub struct MidiState {
     pub midi_conn: Mutex<Option<(String, MidiOutputConnection)>>,
@@ -16,14 +16,19 @@ pub async fn send_midi_note(
     let mut midi_conn_guard = state.midi_conn.lock().unwrap();
     const CHANNEL: u8 = 0;
 
-    if midi_conn_guard.as_ref().map_or(true, |(name, _)| name != &port_name) {
+    if midi_conn_guard
+        .as_ref()
+        .map_or(true, |(name, _)| name != &port_name)
+    {
         let midi_out = MidiOutput::new("Pulsoid MIDI Output").map_err(|e| e.to_string())?;
         let ports = midi_out.ports();
         let port = ports
             .iter()
             .find(|p| midi_out.port_name(p).unwrap_or_default() == port_name)
             .ok_or_else(|| format!("MIDI port '{}' not found", port_name))?;
-        let conn = midi_out.connect(port, "midi_out").map_err(|e| e.to_string())?;
+        let conn = midi_out
+            .connect(port, "midi_out")
+            .map_err(|e| e.to_string())?;
         *midi_conn_guard = Some((port_name.clone(), conn));
     }
 
@@ -48,14 +53,19 @@ pub async fn send_midi_heartrate(
     let mut midi_conn_guard = state.midi_conn.lock().unwrap();
     const CHANNEL: u8 = 0;
 
-    if midi_conn_guard.as_ref().map_or(true, |(name, _)| name != &port_name) {
+    if midi_conn_guard
+        .as_ref()
+        .map_or(true, |(name, _)| name != &port_name)
+    {
         let midi_out = MidiOutput::new("Pulsoid MIDI Output").map_err(|e| e.to_string())?;
         let ports = midi_out.ports();
         let port = ports
             .iter()
             .find(|p| midi_out.port_name(p).unwrap_or_default() == port_name)
             .ok_or_else(|| format!("MIDI port '{}' not found", port_name))?;
-        let conn = midi_out.connect(port, "midi_out").map_err(|e| e.to_string())?;
+        let conn = midi_out
+            .connect(port, "midi_out")
+            .map_err(|e| e.to_string())?;
         *midi_conn_guard = Some((port_name.clone(), conn));
     }
 

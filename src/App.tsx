@@ -1,8 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Event } from "@tauri-apps/api/event";
-import { listen } from "@tauri-apps/api/event";
-
 import { Activity, Bluetooth } from "lucide-react";
 import SettingsPanel from "./components/SettingsPanel";
 import ConnectionControls from "./components/ConnectionControls";
@@ -10,41 +7,25 @@ import "./App.css";
 import { Config } from "./types";
 import { setConfig, RootState } from "./store";
 import { useDispatch, useSelector } from "react-redux";
-import { connectWebSocket, getWebSocketUrl } from "./websocket";
+import { HeartRateInputOutput } from "./managers/HeartRateInputOutput";
+import { BluetoothManager } from "./managers/BluetoothManager";
+import { WebSocketManager } from "./managers/websocket";
 
 function App() {
   const dispatch = useDispatch();
   const config = useSelector((state: RootState) => state.app.config);
+  const heartRate = useSelector((state: RootState) => state.app.heartRate);
   
-  const [hr, setHr] = useState<number>(0);
-  const [wsInstance, setWsInstance] = useState<WebSocket | null>(null);
   const [isWidgetConnected, setIsWidgetConnected] = useState<boolean>(false);
   const [isBluetoothConnected, setIsBluetoothConnected] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [bluetoothDevices, setBluetoothDevices] = useState<[string, string][]>([]);
-  const [bluetoothCleanup, setBluetoothCleanup] = useState<(() => void) | null>(null);
   const [isLoadingConfig, setIsLoadingConfig] = useState<boolean>(false);
-
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-
-    const setupListener = async () => {
-      unlisten = await listen<number>("heart_rate_update", (event: Event<number>) => {
-        console.log("Received heart rate update (Tauri event):", event.payload);
-        setHr((prevHr) => {
-          console.log("Updating hr state from", prevHr, "to", event.payload);
-          return event.payload;
-        });
-      });
-    };
-
-    setupListener().catch((err) => console.error("Failed to setup listener:", err));
-
-    return () => {
-      console.log("Cleaning up heart_rate_update listener");
-      if (unlisten) unlisten();
-    };
-  }, []);
+  
+  // 매니저 인스턴스를 ref로 관리
+  const heartRateIORef = useRef<HeartRateInputOutput | null>(null);
+  const bluetoothManagerRef = useRef<BluetoothManager | null>(null);
+  const webSocketManagerRef = useRef<WebSocketManager | null>(null);
 
   const loadConfig = async () => {
     setIsLoadingConfig(true);
@@ -75,16 +56,20 @@ function App() {
   
       // Redux 상태 업데이트
       dispatch(setConfig(finalConfig));
-  
+      
+      // 각 매니저 초기화
+      initializeManagers(finalConfig);
+      
       // 상태가 반영될 시간을 주기 위해 잠시 대기
       await new Promise(resolve => setTimeout(resolve, 100));
   
-      // config가 위젯 모드일 경우 직접 finalConfig를 사용하여 reconnect 호출
+      // 설정된 모드에 따라 연결 시도
       if (finalConfig.mode === "widget") {
         console.log("Config mode is 'widget', initiating reconnect with loaded config...");
         await reconnectWithConfig(finalConfig);
-      } else {
-        console.log("Config mode is not 'widget', skipping reconnect");
+      } else if (finalConfig.mode === "bluetooth" && finalConfig.bluetooth_device_id) {
+        console.log("Config mode is 'bluetooth', initiating reconnect with loaded config...");
+        await reconnectWithConfig(finalConfig);
       }
     } catch (error) {
       console.error("Failed to load settings:", error);
@@ -102,116 +87,105 @@ function App() {
       };
       await invoke("save_config", { config: defaultConfig });
       dispatch(setConfig(defaultConfig));
+      initializeManagers(defaultConfig);
     } finally {
       setIsLoadingConfig(false);
     }
   };
 
-  const connectBluetooth = async (config: Config): Promise<(() => void) | null> => {
+  const initializeManagers = (config: Config) => {
+    // HeartRateInputOutput 초기화
+    if (!heartRateIORef.current) {
+      heartRateIORef.current = new HeartRateInputOutput(config, dispatch);
+    } else {
+      heartRateIORef.current.updateConfig(config);
+    }
+  
+    // BluetoothManager 초기화
+    if (!bluetoothManagerRef.current) {
+      if (!heartRateIORef.current) {
+        console.error("HeartRateInputOutput is not initialized");
+        return;
+      }
+      bluetoothManagerRef.current = new BluetoothManager(config, heartRateIORef.current);
+    } else {
+      bluetoothManagerRef.current.updateConfig(config);
+    }
+  
+    // WebSocketManager 초기화
+    if (!webSocketManagerRef.current) {
+      if (!heartRateIORef.current) {
+        console.error("HeartRateInputOutput is not initialized");
+        return;
+      }
+      webSocketManagerRef.current = new WebSocketManager(config, heartRateIORef.current);
+    } else {
+      webSocketManagerRef.current.updateConfig(config);
+    }
+  };
+
+  const reconnectWithConfig = async (localConfig: Config) => {
     try {
-      console.log("Connecting to Bluetooth device:", config.bluetooth_device_id);
-      await invoke("connect_bluetooth", { deviceId: config.bluetooth_device_id });
-      setIsBluetoothConnected(true);
-      
-      await invoke("send_osc_bool", {
-        ip: config.osc_ip,
-        port: config.osc_port,
-        address: config.hr_connected_address,
-        value: true,
-      }).catch(err => console.error("Failed to send OSC on connect:", err));
-      
-      await invoke("send_midi_note", {
-        portName: config.midi_port,
-        note: 60,
-        velocity: 127,
-      }).catch(err => console.error("Failed to send MIDI on connect:", err));
-      
-      return () => {
-        console.log("Executing Bluetooth cleanup function");
-        invoke("disconnect_bluetooth", { deviceId: config.bluetooth_device_id })
-          .catch(err => console.error("Failed to disconnect Bluetooth:", err));
-        
-        invoke("send_osc_bool", {
-          ip: config.osc_ip,
-          port: config.osc_port,
-          address: config.hr_connected_address,
-          value: false,
-        }).catch(err => console.error("Failed to send OSC on disconnect:", err));
-        
-        invoke("send_midi_note", {
-          portName: config.midi_port,
-          note: 60,
-          velocity: 0,
-        }).catch(err => console.error("Failed to send MIDI on disconnect:", err));
-        
-        setIsBluetoothConnected(false);
-      };
+      await disconnectAll();
+  
+      if (localConfig.mode === "widget") {
+        if (!localConfig.widget_id) {
+          console.error("Widget ID is not configured");
+          return;
+        }
+  
+        if (webSocketManagerRef.current) {
+          console.log("Reconnecting to WebSocket...");
+          await webSocketManagerRef.current.connect();
+          setIsWidgetConnected(webSocketManagerRef.current.isConnectedStatus());
+        }
+      } else if (localConfig.mode === "bluetooth") {
+        if (!localConfig.bluetooth_device_id) {
+          console.error("Bluetooth device ID is not configured");
+          return;
+        }
+  
+        console.log(`Reconnecting to Bluetooth device: ${localConfig.bluetooth_device_id}`);
+        await connectToDevice(localConfig.bluetooth_device_id); // connectToDevice 호출
+      }
     } catch (error) {
-      console.error("Bluetooth connection failed:", error);
+      console.error("Reconnection failed:", error);
+      setIsWidgetConnected(false);
       setIsBluetoothConnected(false);
-      return null;
+    }
+  };
+
+  const disconnectAll = async () => {
+    if (webSocketManagerRef.current) {
+      webSocketManagerRef.current.disconnect();
+      setIsWidgetConnected(false);
+    }
+    if (bluetoothManagerRef.current) {
+      console.log("Disconnecting Bluetooth in disconnectAll...");
+      await bluetoothManagerRef.current.disconnect();
+      setIsBluetoothConnected(false);
     }
   };
 
   const selectBluetoothDevice = async (): Promise<[string, string][]> => {
-    try {
-      const devices: [string, string][] = await invoke("scan_bluetooth_devices");
-      console.log("Scanned devices:", devices);
+    if (bluetoothManagerRef.current) {
+      console.log("Scanning for Bluetooth devices...");
+      const devices = await bluetoothManagerRef.current.scanDevices();
       setBluetoothDevices(devices);
+      console.log("Available devices:", devices);
       return devices;
-    } catch (error) {
-      console.error("Bluetooth scan failed:", error);
-      return [];
     }
+    console.warn("BluetoothManager is not initialized.");
+    return [];
   };
-
-  const safelyCloseAllConnections = async () => {
-    if (wsInstance) {
-      console.log("Safely closing WebSocket connection");
-      wsInstance.close();
-      setWsInstance(null);
-      setIsWidgetConnected(false);
-    }
-    
-    if (bluetoothCleanup) {
-      console.log("Safely closing Bluetooth connection");
-      bluetoothCleanup();
-      setBluetoothCleanup(null);
-      setIsBluetoothConnected(false);
-    }
-    
-    await new Promise(resolve => setTimeout(resolve, 800));
-    console.log("All connections closed safely");
-  };
-
-  useEffect(() => {
-    loadConfig();
-  }, []); // 앱 시작 시 한 번만 실행
-
-  useEffect(() => {
-    if (config) {
-      const intervalId = setInterval(() => {
-        sendHrConnectedStatus();
-      }, 10000);
-      return () => clearInterval(intervalId);
-    }
-  }, [config, wsInstance, isBluetoothConnected, isWidgetConnected]);
-
-  const sendHrConnectedStatus = () => {
-    if (config) {
-      const connected = config.mode === "widget" ? isWidgetConnected : isBluetoothConnected;
-      invoke("send_osc_bool", {
-        ip: config.osc_ip,
-        port: config.osc_port,
-        address: config.hr_connected_address,
-        value: connected,
-      });
-      
-      invoke("send_midi_note", {
-        portName: config.midi_port,
-        note: 60,
-        velocity: connected ? 127 : 0,
-      });
+  
+  const connectToDevice = async (deviceId: string) => {
+    if (bluetoothManagerRef.current) {
+      console.log(`Connecting to Bluetooth device with ID: ${deviceId}`);
+      await bluetoothManagerRef.current.connect(deviceId);
+      console.log(`Connection attempt to device ${deviceId} completed.`);
+    } else {
+      console.warn("BluetoothManager is not initialized.");
     }
   };
 
@@ -220,141 +194,37 @@ function App() {
       console.warn("No configuration available. Cannot toggle mode.");
       return;
     }
-
+  
     try {
       const currentMode = config.mode;
       const newMode = currentMode === "bluetooth" ? "widget" : "bluetooth";
       console.log(`Switching mode from ${currentMode} to ${newMode}`);
-
-      await safelyCloseAllConnections();
-
+  
+      await disconnectAll();
+  
       const newConfig = {
         ...config,
         mode: newMode,
       };
-
+  
       await invoke("save_config", { config: newConfig });
       dispatch(setConfig(newConfig));
-
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      if (newMode === "widget") {
-        if (!newConfig.widget_id) {
-          console.error("Widget ID is not configured");
-          return;
-        }
-
-        console.log("Attempting to connect to widget...");
-        if (wsInstance) {
-          console.warn("Existing WebSocket connection found, closing it...");
-          wsInstance.close();
-          setWsInstance(null);
-          setIsWidgetConnected(false);
-          await new Promise(resolve => setTimeout(resolve, 300));
-        }
-
-        await connectWebSocket(newConfig, setHr, setIsWidgetConnected, setWsInstance);
-        console.log("Widget connection established");
-      } else {
-        if (!newConfig.bluetooth_device_id) {
-          console.log("No Bluetooth device configured, scanning...");
-          const devices = await selectBluetoothDevice();
-          if (devices.length > 0) {
-            const updatedConfig = { ...newConfig, bluetooth_device_id: devices[0][0] };
-            await invoke("save_config", { config: updatedConfig });
-            dispatch(setConfig(updatedConfig));
-            newConfig.bluetooth_device_id = updatedConfig.bluetooth_device_id;
-          } else {
-            console.error("No Bluetooth devices found");
-            return;
-          }
-        }
-
-        console.log("Attempting to connect to Bluetooth device...");
-        if (bluetoothCleanup) {
-          console.warn("Existing Bluetooth connection found, closing it...");
-          bluetoothCleanup();
-          setBluetoothCleanup(null);
-          setIsBluetoothConnected(false);
-          await new Promise(resolve => setTimeout(resolve, 300));
-        }
-
-        const cleanup = await connectBluetooth(newConfig);
-        if (cleanup) {
-          setBluetoothCleanup(() => cleanup);
-          console.log("Bluetooth connection established with cleanup");
+      
+      if (heartRateIORef.current) {
+        heartRateIORef.current.updateConfig(newConfig);
+        if (newMode === "widget") {
+          heartRateIORef.current.setConnected(false, "bluetooth"); // 블루투스 상태 초기화
         }
       }
-
-      sendHrConnectedStatus();
-
+      if (bluetoothManagerRef.current) bluetoothManagerRef.current.updateConfig(newConfig);
+      if (webSocketManagerRef.current) webSocketManagerRef.current.updateConfig(newConfig);
+  
+      await reconnectWithConfig(newConfig);
     } catch (error) {
       console.error("Failed to toggle mode:", error);
       setIsBluetoothConnected(false);
       setIsWidgetConnected(false);
       alert("Mode toggle failed. Please check connections and try again.");
-    }
-  };
-
-  const reconnectWithConfig = async (localConfig: Config) => {
-    try {
-      console.log(`Reconnecting with mode: ${localConfig.mode}`);
-  
-      await safelyCloseAllConnections();
-  
-      if (localConfig.mode === "widget") {
-        if (!localConfig.widget_id) {
-          console.error("Widget ID is not configured");
-          return;
-        }
-  
-        console.log("Reconnecting to widget...");
-        if (wsInstance) {
-          console.warn("Existing WebSocket connection found, closing it...");
-          wsInstance.close();
-          setWsInstance(null);
-          setIsWidgetConnected(false);
-          await new Promise(resolve => setTimeout(resolve, 300));
-        }
-  
-        await connectWebSocket(localConfig, setHr, setIsWidgetConnected, setWsInstance);
-        console.log("Widget reconnection successful");
-      } else {
-        if (!localConfig.bluetooth_device_id) {
-          console.log("No Bluetooth device configured, scanning...");
-          const devices = await selectBluetoothDevice();
-          if (devices.length > 0) {
-            const updatedConfig = { ...localConfig, bluetooth_device_id: devices[0][0] };
-            await invoke("save_config", { config: updatedConfig });
-            dispatch(setConfig(updatedConfig));
-          } else {
-            console.error("No Bluetooth devices found");
-            return;
-          }
-        }
-  
-        console.log("Reconnecting to Bluetooth device...");
-        if (bluetoothCleanup) {
-          console.warn("Existing Bluetooth connection found, closing it...");
-          bluetoothCleanup();
-          setBluetoothCleanup(null);
-          setIsBluetoothConnected(false);
-          await new Promise(resolve => setTimeout(resolve, 300));
-        }
-  
-        const cleanup = await connectBluetooth(localConfig);
-        if (cleanup) {
-          setBluetoothCleanup(() => cleanup);
-          console.log("Bluetooth reconnection successful with cleanup");
-        }
-      }
-  
-      sendHrConnectedStatus();
-  
-    } catch (error) {
-      console.error("Reconnection failed:", error);
-      setIsBluetoothConnected(false);
-      setIsWidgetConnected(false);
     }
   };
   
@@ -367,11 +237,50 @@ function App() {
     await reconnectWithConfig(config);
   };
 
-  const hrPercentage = config ? Math.min(100, (hr / config.max_hr) * 100) : 0;
+  useEffect(() => {
+    loadConfig();
+    
+    return () => {
+      // 컴포넌트 언마운트 시 정리
+      disconnectAll();
+    };
+  }, []);
+
+  useEffect(() => {
+    // 연결 상태 업데이트
+    if (webSocketManagerRef.current && config?.mode === "widget") {
+      setIsWidgetConnected(webSocketManagerRef.current.isConnectedStatus());
+    }
+  
+    if (bluetoothManagerRef.current && config?.mode === "bluetooth") {
+      setIsBluetoothConnected(bluetoothManagerRef.current.getConnectionStatus());
+    }
+  }, [config?.mode]);
+
+  useEffect(() => {
+    if (heartRateIORef.current) {
+      const handleConnectionChange = (isConnected: boolean, type: "bluetooth" | "widget") => {
+        console.log(`Connection status changed: ${isConnected}, type: ${type}`);
+        if (type === "bluetooth") {
+          setIsBluetoothConnected(isConnected);
+        } else if (type === "widget") {
+          setIsWidgetConnected(isConnected);
+        }
+      };
+  
+      // 연결 상태 변경 리스너 등록
+      heartRateIORef.current.addConnectionListener(handleConnectionChange);
+  
+      // 컴포넌트 언마운트 시 리스너 제거
+      return () => {
+        heartRateIORef.current?.removeConnectionListener(handleConnectionChange);
+      };
+    }
+  }, [heartRateIORef.current]);
+
+  const hrPercentage = config ? Math.min(100, (heartRate / config.max_hr) * 100) : 0;
   const isConnected = config?.mode === "bluetooth" ? isBluetoothConnected : isWidgetConnected;
-
-  console.log("Rendering with hr:", hr, "hrPercentage:", hrPercentage, "isConnected:", isConnected);
-
+  
   return (
     <div className="bg-gray-100 dark:bg-gray-900 w-[320px] h-[260px] overflow-hidden">
       {!showSettings ? (
@@ -395,7 +304,7 @@ function App() {
           <div className="flex flex-col items-center justify-center">
             <div className="relative h-32 w-32 mb-2">
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-4xl font-bold text-gray-800 dark:text-white">{Math.round(hr)}</span>
+                <span className="text-4xl font-bold text-gray-800 dark:text-white">{Math.round(heartRate)}</span>
                 <span className="text-xs text-gray-500 dark:text-gray-400">BPM</span>
               </div>
               <svg className="h-full w-full" viewBox="0 0 100 100">
