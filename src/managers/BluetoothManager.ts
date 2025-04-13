@@ -9,6 +9,7 @@ export class BluetoothManager {
   private heartRateIO: HeartRateInputOutput;
   private unlistenHandler: (() => void) | null = null;
   private isConnected: boolean = false;
+  private currentDeviceId: string | null = null;
 
   constructor(config: Config, heartRateIO: HeartRateInputOutput) {
     this.config = config;
@@ -35,17 +36,12 @@ export class BluetoothManager {
   async connect(deviceId: string): Promise<void> {
     try {
       console.log(`Attempting to connect to Bluetooth device: ${deviceId}`);
-      
-      // 기존 이벤트 리스너 해제
       await this.cleanup();
-
-      // Tauri 블루투스 연결
       await invoke("connect_bluetooth", { deviceId });
       this.isConnected = true;
+      this.currentDeviceId = deviceId;
       console.log(`Successfully connected to device: ${deviceId}`);
       this.heartRateIO.setConnected(true, "bluetooth");
-
-      // 블루투스 심박수 이벤트 리스너 설정
       this.unlistenHandler = await listen<number>("heart_rate_update", (event: Event<number>) => {
         console.log("Heart rate update received:", event.payload);
         this.heartRateIO.updateHeartRate(event.payload);
@@ -53,21 +49,28 @@ export class BluetoothManager {
     } catch (error) {
       console.error(`Failed to connect to device: ${deviceId}`, error);
       this.isConnected = false;
+      this.currentDeviceId = null;
       this.heartRateIO.setConnected(false, "bluetooth");
     }
   }
 
   async disconnect(): Promise<void> {
     try {
-      console.log("Disconnecting from Bluetooth device...");
-      await invoke("disconnect_bluetooth");
-      await this.cleanup(); // 이벤트 리스너 정리 추가
+      if (!this.currentDeviceId) {
+        console.warn("No Bluetooth device connected, skipping disconnect.");
+        return;
+      }
+      console.log(`Disconnecting from Bluetooth device: ${this.currentDeviceId}`);
+      await invoke("disconnect_bluetooth", { deviceId: this.currentDeviceId });
+      await this.cleanup();
       this.isConnected = false;
+      this.currentDeviceId = null;
       console.log("Successfully disconnected from Bluetooth device.");
       this.heartRateIO.setConnected(false, "bluetooth");
     } catch (error) {
-      console.error("Failed to disconnect from Bluetooth device:", error);
+      console.error(`Failed to disconnect from Bluetooth device: ${this.currentDeviceId}`, error);
       this.isConnected = false;
+      this.currentDeviceId = null;
       this.heartRateIO.setConnected(false, "bluetooth");
     }
   }

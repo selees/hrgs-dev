@@ -127,26 +127,28 @@ function App() {
   const reconnectWithConfig = async (localConfig: Config) => {
     try {
       await disconnectAll();
-  
       if (localConfig.mode === "widget") {
         if (!localConfig.widget_id) {
           console.error("Widget ID is not configured");
           return;
         }
-  
         if (webSocketManagerRef.current) {
           console.log("Reconnecting to WebSocket...");
           await webSocketManagerRef.current.connect();
-          setIsWidgetConnected(webSocketManagerRef.current.isConnectedStatus());
+          const isConnected = webSocketManagerRef.current.isConnectedStatus();
+          setIsWidgetConnected(isConnected);
+          if (isConnected && heartRateIORef.current) {
+            console.log("Setting HeartRateInputOutput to widget mode connected");
+            heartRateIORef.current.setConnected(true, "widget");
+          }
         }
       } else if (localConfig.mode === "bluetooth") {
         if (!localConfig.bluetooth_device_id) {
           console.error("Bluetooth device ID is not configured");
           return;
         }
-  
         console.log(`Reconnecting to Bluetooth device: ${localConfig.bluetooth_device_id}`);
-        await connectToDevice(localConfig.bluetooth_device_id); // connectToDevice 호출
+        await connectToDevice(localConfig.bluetooth_device_id);
       }
     } catch (error) {
       console.error("Reconnection failed:", error);
@@ -157,13 +159,19 @@ function App() {
 
   const disconnectAll = async () => {
     if (webSocketManagerRef.current) {
+      console.log("Disconnecting WebSocket...");
       webSocketManagerRef.current.disconnect();
       setIsWidgetConnected(false);
     }
     if (bluetoothManagerRef.current) {
-      console.log("Disconnecting Bluetooth in disconnectAll...");
+      console.log("Disconnecting Bluetooth...");
       await bluetoothManagerRef.current.disconnect();
       setIsBluetoothConnected(false);
+    }
+    if (heartRateIORef.current) {
+      console.log("Resetting HeartRateInputOutput connection...");
+      heartRateIORef.current.setConnected(false, "bluetooth");
+      heartRateIORef.current.setConnected(false, "widget");
     }
   };
 
@@ -212,9 +220,7 @@ function App() {
       
       if (heartRateIORef.current) {
         heartRateIORef.current.updateConfig(newConfig);
-        if (newMode === "widget") {
-          heartRateIORef.current.setConnected(false, "bluetooth"); // 블루투스 상태 초기화
-        }
+        heartRateIORef.current.setConnected(false, currentMode as "bluetooth" | "widget");
       }
       if (bluetoothManagerRef.current) bluetoothManagerRef.current.updateConfig(newConfig);
       if (webSocketManagerRef.current) webSocketManagerRef.current.updateConfig(newConfig);

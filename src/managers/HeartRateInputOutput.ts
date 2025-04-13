@@ -27,11 +27,11 @@ export class HeartRateInputOutput {
   }
 
   updateHeartRate(value: number): void {
-    if (this.connectionType === "widget" && this.config.mode === "widget") {
-      console.warn("Ignoring heart rate update in widget mode");
+    console.log(`Received heart rate update: ${value}, current mode: ${this.config.mode}, connectionType: ${this.connectionType}`);
+    if (this.config.mode === "widget" && this.connectionType === "bluetooth") {
+      console.warn("Ignoring heart rate update from bluetooth in widget mode");
       return;
     }
-    console.log("Updating heart rate:", value);
     this.heartRate = value;
     this.dispatch(setHeartRate(value));
     this.notifyListeners();
