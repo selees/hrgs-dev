@@ -8,7 +8,6 @@ export class BluetoothManager {
   private config: Config;
   private heartRateIO: HeartRateInputOutput;
   private unlistenHandler: (() => void) | null = null;
-  private isConnected: boolean = false;
   private currentDeviceId: string | null = null;
 
   constructor(config: Config, heartRateIO: HeartRateInputOutput) {
@@ -36,20 +35,15 @@ export class BluetoothManager {
   async connect(deviceId: string): Promise<void> {
     try {
       console.log(`Attempting to connect to Bluetooth device: ${deviceId}`);
-      await this.cleanup();
       await invoke("connect_bluetooth", { deviceId });
-      this.isConnected = true;
-      this.currentDeviceId = deviceId;
-      console.log(`Successfully connected to device: ${deviceId}`);
       this.heartRateIO.setConnected(true, "bluetooth");
+
       this.unlistenHandler = await listen<number>("heart_rate_update", (event: Event<number>) => {
         console.log("Heart rate update received:", event.payload);
-        this.heartRateIO.updateHeartRate(event.payload);
+        this.heartRateIO.updateHeartRate(event.payload); // 심박수 업데이트
       });
     } catch (error) {
       console.error(`Failed to connect to device: ${deviceId}`, error);
-      this.isConnected = false;
-      this.currentDeviceId = null;
       this.heartRateIO.setConnected(false, "bluetooth");
     }
   }
@@ -63,13 +57,11 @@ export class BluetoothManager {
       console.log(`Disconnecting from Bluetooth device: ${this.currentDeviceId}`);
       await invoke("disconnect_bluetooth", { deviceId: this.currentDeviceId });
       await this.cleanup();
-      this.isConnected = false;
       this.currentDeviceId = null;
       console.log("Successfully disconnected from Bluetooth device.");
       this.heartRateIO.setConnected(false, "bluetooth");
     } catch (error) {
       console.error(`Failed to disconnect from Bluetooth device: ${this.currentDeviceId}`, error);
-      this.isConnected = false;
       this.currentDeviceId = null;
       this.heartRateIO.setConnected(false, "bluetooth");
     }
@@ -81,9 +73,5 @@ export class BluetoothManager {
       await this.unlistenHandler();
       this.unlistenHandler = null;
     }
-  }
-
-  getConnectionStatus(): boolean {
-    return this.isConnected;
   }
 }

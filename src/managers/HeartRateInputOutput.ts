@@ -14,7 +14,6 @@ export class HeartRateInputOutput {
   private listeners: HeartRateCallback[] = [];
   private connectionListeners: ConnectionStatusCallback[] = [];
   private timeoutId: ReturnType<typeof setTimeout> | null = null;
-  private statusIntervalId: ReturnType<typeof setInterval> | null = null; // 새 타이머 추가
   private dispatch: AppDispatch;
 
   constructor(config: Config, dispatch: AppDispatch) {
@@ -27,37 +26,50 @@ export class HeartRateInputOutput {
   }
 
   updateHeartRate(value: number): void {
-    console.log(`Received heart rate update: ${value}, current mode: ${this.config.mode}, connectionType: ${this.connectionType}`);
-    if (this.config.mode === "widget" && this.connectionType === "bluetooth") {
-      console.warn("Ignoring heart rate update from bluetooth in widget mode");
-      return;
-    }
+    console.log(`Received heart rate update: ${value}`);
     this.heartRate = value;
     this.dispatch(setHeartRate(value));
+
+    if (value > 0) {
+      this.setConnected(true, this.connectionType);
+    }
+
+    this.resetTimeout(); // 타임아웃 재설정
     this.notifyListeners();
     this.sendToOutputs();
-    this.resetTimeout();
+  }
+
+  isDeviceConnected(): boolean {
+    return this.isConnected;
+  }
+
+  private resetTimeout(): void {
+    this.clearTimeout();
+
+    this.timeoutId = setTimeout(() => {
+      console.warn("Heart rate data timeout - setting isConnected to false");
+      this.setConnected(false, this.connectionType); // 연결 상태를 false로 설정
+    }, this.config.timeout * 1000);
+  }
+
+  private clearTimeout(): void {
+    if (this.timeoutId) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = null;
+    }
   }
 
   setConnected(connected: boolean, type: "bluetooth" | "widget"): void {
-    this.isConnected = connected;
-    this.connectionType = type;
+    if (this.isConnected !== connected) {
+      console.log(`Connection status changed: ${connected}, type: ${type}`);
+      this.isConnected = connected;
+      this.connectionType = type;
 
-    // OSC와 MIDI에 연결 상태 전송
-    this.sendConnectionStatus();
+      // OSC와 MIDI에 연결 상태 전송
+      this.sendConnectionStatus();
 
-    // 연결 상태 변경 이벤트 알림
-    this.notifyConnectionListeners();
-
-    if (connected) {
-      // 연결되었을 때 타임아웃 시작
-      this.resetTimeout();
-      // 10초마다 연결 상태 갱신 시작
-      this.startStatusInterval();
-    } else {
-      // 연결 끊어졌을 때 타임아웃 및 갱신 타이머 제거
-      this.clearTimeout();
-      this.stopStatusInterval();
+      // 연결 상태 변경 이벤트 알림
+      this.notifyConnectionListeners();
     }
   }
 
@@ -73,41 +85,16 @@ export class HeartRateInputOutput {
     this.connectionListeners.forEach(listener => listener(this.isConnected, this.connectionType));
   }
 
-  private resetTimeout(): void {
-    this.clearTimeout();
-    
-    this.timeoutId = setTimeout(() => {
-      if (this.isConnected) {
-        console.warn("Connection timed out");
-        this.setConnected(false, this.connectionType);
-      }
-    }, this.config.timeout * 1000);
+  addHeartRateListener(callback: HeartRateCallback): void {
+    this.listeners.push(callback);
   }
 
-  private clearTimeout(): void {
-    if (this.timeoutId) {
-      clearTimeout(this.timeoutId);
-      this.timeoutId = null;
-    }
+  removeHeartRateListener(callback: HeartRateCallback): void {
+    this.listeners = this.listeners.filter(listener => listener !== callback);
   }
 
-  // 10초마다 연결 상태 갱신 시작
-  private startStatusInterval(): void {
-    this.stopStatusInterval(); // 기존 타이머 정리
-    if (this.isConnected) {
-      this.statusIntervalId = setInterval(() => {
-        console.log("Sending periodic connection status: true");
-        this.sendConnectionStatus();
-      }, 10000); // 10초마다 실행
-    }
-  }
-
-  // 연결 상태 갱신 타이머 중지
-  private stopStatusInterval(): void {
-    if (this.statusIntervalId) {
-      clearInterval(this.statusIntervalId);
-      this.statusIntervalId = null;
-    }
+  private notifyListeners(): void {
+    this.listeners.forEach(listener => listener(this.heartRate));
   }
 
   private sendToOutputs(): void {
@@ -147,29 +134,12 @@ export class HeartRateInputOutput {
     }).catch(err => console.error("Failed to send MIDI connection status:", err));
   }
 
-  addHeartRateListener(callback: HeartRateCallback): void {
-    this.listeners.push(callback);
-  }
-
-  removeHeartRateListener(callback: HeartRateCallback): void {
-    this.listeners = this.listeners.filter(listener => listener !== callback);
-  }
-
-  private notifyListeners(): void {
-    this.listeners.forEach(listener => listener(this.heartRate));
-  }
-
   getHeartRate(): number {
     return this.heartRate;
-  }
-
-  isDeviceConnected(): boolean {
-    return this.isConnected;
   }
 
   disconnect(): void {
     this.setConnected(false, this.connectionType);
     this.clearTimeout();
-    this.stopStatusInterval(); // 타이머 정리
   }
 }

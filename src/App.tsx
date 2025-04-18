@@ -120,7 +120,7 @@ function App() {
       }
       webSocketManagerRef.current = new WebSocketManager(config, heartRateIORef.current);
     } else {
-      webSocketManagerRef.current.updateConfig(config);
+      heartRateIORef.current.updateConfig(config);
     }
   };
 
@@ -135,7 +135,6 @@ function App() {
         if (webSocketManagerRef.current) {
           console.log("Reconnecting to WebSocket...");
           await webSocketManagerRef.current.connect();
-          const isConnected = webSocketManagerRef.current.isConnectedStatus();
           setIsWidgetConnected(isConnected);
           if (isConnected && heartRateIORef.current) {
             console.log("Setting HeartRateInputOutput to widget mode connected");
@@ -222,8 +221,6 @@ function App() {
         heartRateIORef.current.updateConfig(newConfig);
         heartRateIORef.current.setConnected(false, currentMode as "bluetooth" | "widget");
       }
-      if (bluetoothManagerRef.current) bluetoothManagerRef.current.updateConfig(newConfig);
-      if (webSocketManagerRef.current) webSocketManagerRef.current.updateConfig(newConfig);
   
       await reconnectWithConfig(newConfig);
     } catch (error) {
@@ -253,17 +250,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    // 연결 상태 업데이트
-    if (webSocketManagerRef.current && config?.mode === "widget") {
-      setIsWidgetConnected(webSocketManagerRef.current.isConnectedStatus());
-    }
-  
-    if (bluetoothManagerRef.current && config?.mode === "bluetooth") {
-      setIsBluetoothConnected(bluetoothManagerRef.current.getConnectionStatus());
-    }
-  }, [config?.mode]);
-
-  useEffect(() => {
     if (heartRateIORef.current) {
       const handleConnectionChange = (isConnected: boolean, type: "bluetooth" | "widget") => {
         console.log(`Connection status changed: ${isConnected}, type: ${type}`);
@@ -273,11 +259,9 @@ function App() {
           setIsWidgetConnected(isConnected);
         }
       };
-  
-      // 연결 상태 변경 리스너 등록
+
       heartRateIORef.current.addConnectionListener(handleConnectionChange);
-  
-      // 컴포넌트 언마운트 시 리스너 제거
+
       return () => {
         heartRateIORef.current?.removeConnectionListener(handleConnectionChange);
       };
@@ -285,17 +269,17 @@ function App() {
   }, [heartRateIORef.current]);
 
   const hrPercentage = config ? Math.min(100, (heartRate / config.max_hr) * 100) : 0;
-  const isConnected = config?.mode === "bluetooth" ? isBluetoothConnected : isWidgetConnected;
+  const isConnected = heartRateIORef.current?.isDeviceConnected() ?? false;
   
   return (
     <div className="bg-gray-100 dark:bg-gray-900 w-[320px] h-[260px] overflow-hidden">
       {!showSettings ? (
         <div className="bg-white dark:bg-gray-800 h-full p-3">
           <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-1">
-              <div className={`h-2 w-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}></div>
-              <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
-                {isConnected ? "Connected" : "Disconnected"}
+        <div className="flex items-center gap-1">
+          <div className={`h-2 w-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}></div>
+          <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
+            {isConnected ? "Connected" : "Disconnected"}
               </span>
             </div>
             <ConnectionControls
