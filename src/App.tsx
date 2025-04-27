@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Activity, Bluetooth } from "lucide-react";
 import SettingsPanel from "./components/SettingsPanel";
@@ -21,6 +21,10 @@ function App() {
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [bluetoothDevices, setBluetoothDevices] = useState<[string, string][]>([]);
   const [isLoadingConfig, setIsLoadingConfig] = useState<boolean>(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isSystemConnected, setIsSystemConnected] = useState<boolean>(false); // 시스템 연결 상태
+  const [guiIsConnected, setGuiIsConnected] = useState<boolean>(false); // GUI 연결 상태
   
   // 매니저 인스턴스를 ref로 관리
   const heartRateIORef = useRef<HeartRateInputOutput | null>(null);
@@ -157,20 +161,25 @@ function App() {
   };
 
   const disconnectAll = async () => {
-    if (webSocketManagerRef.current) {
-      console.log("Disconnecting WebSocket...");
-      webSocketManagerRef.current.disconnect();
-      setIsWidgetConnected(false);
-    }
-    if (bluetoothManagerRef.current) {
-      console.log("Disconnecting Bluetooth...");
-      await bluetoothManagerRef.current.disconnect();
-      setIsBluetoothConnected(false);
-    }
-    if (heartRateIORef.current) {
-      console.log("Resetting HeartRateInputOutput connection...");
-      heartRateIORef.current.setConnected(false, "bluetooth");
-      heartRateIORef.current.setConnected(false, "widget");
+    try {
+      if (webSocketManagerRef.current) {
+        console.log("Disconnecting WebSocket...");
+        webSocketManagerRef.current.disconnect();
+        setIsWidgetConnected(false);
+      }
+  
+      if (bluetoothManagerRef.current) {
+        console.log("Disconnecting Bluetooth...");
+        await bluetoothManagerRef.current.disconnect();
+        setIsBluetoothConnected(false);
+      }
+  
+      if (heartRateIORef.current) {
+        console.log("Resetting HeartRateInputOutput connection...");
+        heartRateIORef.current.setConnected(false, "bluetooth");
+      }
+    } catch (error) {
+      console.error("Error during disconnectAll:", error);
     }
   };
 
@@ -207,6 +216,11 @@ function App() {
       const newMode = currentMode === "bluetooth" ? "widget" : "bluetooth";
       console.log(`Switching mode from ${currentMode} to ${newMode}`);
   
+      // 기존 리스너 정리
+      if (heartRateIORef.current) {
+        heartRateIORef.current.removeConnectionListener(handleConnectionChange);
+      }
+  
       await disconnectAll();
   
       const newConfig = {
@@ -227,18 +241,67 @@ function App() {
       console.error("Failed to toggle mode:", error);
       setIsBluetoothConnected(false);
       setIsWidgetConnected(false);
-      alert("Mode toggle failed. Please check connections and try again.");
     }
   };
   
   const reconnect = async () => {
-    if (!config) {
-      console.error("No configuration provided for reconnection");
+    if (isReconnecting) {
+      console.warn("Reconnection is already in progress.");
       return;
     }
-  
-    await reconnectWithConfig(config);
+
+    setIsReconnecting(true);
+    try {
+      if (!config) {
+        console.error("No configuration provided for reconnection");
+        return;
+      }
+
+      console.log("Starting reconnection...");
+
+      // 기존 연결 종료 및 리스너 정리
+      await disconnectAll();
+
+      // 새로운 연결 수행
+      await reconnectWithConfig(config);
+
+      console.log("Reconnection completed.");
+    } catch (error) {
+      console.error("Reconnection failed:", error);
+      setError("Reconnection failed.");
+    } finally {
+      setIsReconnecting(false);
+    }
   };
+
+  const addBluetoothListener = () => {
+    if (bluetoothManagerRef.current) {
+      bluetoothManagerRef.current.addBluetoothListener();
+    }
+  };
+
+  const removeBluetoothListener = () => {
+    if (bluetoothManagerRef.current) {
+      bluetoothManagerRef.current.removeBluetoothListener();
+    }
+  };
+
+  const handleConnectionChange = useCallback(
+    (isConnected: boolean, type: "bluetooth" | "widget") => {
+      console.log(`System connection status changed: ${isConnected}, type: ${type}`);
+      setIsSystemConnected(isConnected); // 시스템 연결 상태 업데이트
+
+      // GUI 상태 업데이트
+      if (isConnected) {
+        setGuiIsConnected(true);
+      } else {
+        setTimeout(() => {
+          setGuiIsConnected(false); // 타임아웃 후 GUI 상태 업데이트
+        }, 1000); // 사용자 경험을 위해 약간의 지연 추가
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     loadConfig();
@@ -251,19 +314,27 @@ function App() {
 
   useEffect(() => {
     if (heartRateIORef.current) {
-      const handleConnectionChange = (isConnected: boolean, type: "bluetooth" | "widget") => {
-        console.log(`Connection status changed: ${isConnected}, type: ${type}`);
-        if (type === "bluetooth") {
-          setIsBluetoothConnected(isConnected);
-        } else if (type === "widget") {
-          setIsWidgetConnected(isConnected);
-        }
-      };
-
       heartRateIORef.current.addConnectionListener(handleConnectionChange);
-
+  
       return () => {
         heartRateIORef.current?.removeConnectionListener(handleConnectionChange);
+      };
+    }
+  }, [handleConnectionChange]);
+
+  useEffect(() => {
+    if (heartRateIORef.current) {
+      const handleGuiConnectionChange = (isConnected: boolean) => {
+        console.log(`GUI connection status changed: ${isConnected}`);
+        setGuiIsConnected(isConnected);
+      };
+  
+      console.log("Adding GUI connection listener...");
+      heartRateIORef.current.addGuiConnectionListener(handleGuiConnectionChange);
+  
+      return () => {
+        console.log("Removing GUI connection listener...");
+        heartRateIORef.current?.removeGuiConnectionListener(handleGuiConnectionChange);
       };
     }
   }, [heartRateIORef.current]);
@@ -277,9 +348,9 @@ function App() {
         <div className="bg-white dark:bg-gray-800 h-full p-3">
           <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-1">
-          <div className={`h-2 w-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}></div>
+          <div className={`h-2 w-2 rounded-full ${guiIsConnected ? "bg-green-500" : "bg-red-500"}`}></div>
           <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
-            {isConnected ? "Connected" : "Disconnected"}
+            {guiIsConnected ? "Connected" : "Disconnected"}
               </span>
             </div>
             <ConnectionControls
@@ -288,6 +359,11 @@ function App() {
               selectBluetoothDevice={selectBluetoothDevice}
               setShowSettings={setShowSettings}
               showSettings={showSettings}
+              isWidgetMode={config?.mode === "widget"}
+              isBluetoothConnected={isBluetoothConnected}
+              addBluetoothListener={addBluetoothListener}
+              removeBluetoothListener={removeBluetoothListener}
+              connectToDevice={connectToDevice}
             />
           </div>
 
