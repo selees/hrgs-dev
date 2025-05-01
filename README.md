@@ -2,6 +2,10 @@
 
 Bluetooth,OSC,MIDI,Pulsoid
 
+## Document
+
+[Notion](https://savory-advantage-23c.notion.site/HRGS-Document-1e6051388dc880b3af76d270ae0b2b88?pvs=4)
+
 ## Booth
 
 [HeartRat OSC](https://selees824.booth.pm/items/5531594)
