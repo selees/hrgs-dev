@@ -1,1 +1,0 @@
-{"mode":"bluetooth","widgetId":"388d4f5f-7686-4294-bc7c-c55d9ab16ee0","maxHr":200.0,"oscIp":"127.0.0.1","oscPort":9000,"hrPercentAddress":"/avatar/parameters/hr_percent","hrConnectedAddress":"/avatar/parameters/hr_connected","midiPort":"hroscmidi","timeout":10,"bluetoothDeviceId":"L"}

@@ -132,6 +132,18 @@ export class HeartRateInputOutput {
   private notifyGuiConnectionListeners(isConnected: boolean): void {
     console.log("Notifying GUI connection listeners with value:", isConnected);
     this.guiConnectionListeners.forEach(listener => listener(isConnected));
+
+    // GUI 상태 변경 시 즉각 OSC로 값 전송
+    this.sendGuiConnectionStatus(isConnected);
+  }
+
+  private sendGuiConnectionStatus(isConnected: boolean): void {
+    invoke("send_osc_bool", {
+      ip: this.config.osc_ip,
+      port: this.config.osc_port,
+      address: this.config.hr_connected_address,
+      value: isConnected,
+    }).catch(err => console.error("Failed to send OSC GUI connection status:", err));
   }
 
   addHeartRateListener(callback: HeartRateCallback): void {
