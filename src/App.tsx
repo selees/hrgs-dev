@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+  import { useEffect, useState, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Activity, Bluetooth } from "lucide-react";
 import SettingsPanel from "./components/SettingsPanel";
@@ -23,6 +23,8 @@ function App() {
   const [isLoadingConfig, setIsLoadingConfig] = useState<boolean>(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isScanning, setIsScanning] = useState(false); // 스캔 진행 상태 (UI용)
+  const [isConnecting, setIsConnecting] = useState(false); // 장치 연결 시도 상태 (UI용)
   const [isSystemConnected, setIsSystemConnected] = useState<boolean>(false); // 시스템 연결 상태
   const [guiIsConnected, setGuiIsConnected] = useState<boolean>(false); // GUI 연결 상태
   
@@ -30,6 +32,7 @@ function App() {
   const heartRateIORef = useRef<HeartRateInputOutput | null>(null);
   const bluetoothManagerRef = useRef<BluetoothManager | null>(null);
   const webSocketManagerRef = useRef<WebSocketManager | null>(null);
+  const connectionControlsRef = useRef<{ handleReconnect: () => Promise<void> }>(null);
 
   const loadConfig = async () => {
     setIsLoadingConfig(true);
@@ -146,20 +149,21 @@ function App() {
           }
         }
       } else if (localConfig.mode === "bluetooth") {
-        if (!localConfig.bluetooth_device_id) {
-          console.error("Bluetooth device ID is not configured");
-          return;
+        if(localConfig.bluetooth_device_id !== ""){
+          if (connectionControlsRef.current && connectionControlsRef.current.handleReconnect) {
+              await connectionControlsRef.current.handleReconnect();
+          }
         }
-        console.log(`Reconnecting to Bluetooth device: ${localConfig.bluetooth_device_id}`);
-        await connectToDevice(localConfig.bluetooth_device_id);
       }
-    } catch (error) {
-      console.error("Reconnection failed:", error);
-      setIsWidgetConnected(false);
-      setIsBluetoothConnected(false);
+    }catch (error) {
+            console.error("Reconnection failed:", error);
+            setIsWidgetConnected(false);
+            setIsBluetoothConnected(false);
+            setIsScanning(false);
+            setIsConnecting(false);
     }
-  };
-
+  }
+    
   const disconnectAll = async () => {
     try {
       if (webSocketManagerRef.current) {
@@ -197,13 +201,26 @@ function App() {
   
   const connectToDevice = async (deviceId: string) => {
     if (bluetoothManagerRef.current) {
-      console.log(`Connecting to Bluetooth device with ID: ${deviceId}`);
-      await bluetoothManagerRef.current.connect(deviceId);
-      console.log(`Connection attempt to device ${deviceId} completed.`);
+      setIsConnecting(true);
+      try {
+        console.log(`Connecting to Bluetooth device with ID: ${deviceId}`);
+        await bluetoothManagerRef.current.connect(deviceId);
+        console.log(`Connection attempt to device ${deviceId} completed.`);
+        // Assume success if no exception thrown
+        setIsBluetoothConnected(true);
+      } catch (err) {
+        console.error(`Failed to connect to Bluetooth device ${deviceId}:`, err);
+        setIsBluetoothConnected(false);
+        setError(typeof err === "string" ? err : (err as Error)?.message ?? "Bluetooth connect failed");
+      } finally {
+        setIsConnecting(false);
+      }
     } else {
       console.warn("BluetoothManager is not initialized.");
+      setIsBluetoothConnected(false);
     }
   };
+
 
   const toggleMode = async () => {
     if (!config) {
@@ -274,34 +291,27 @@ function App() {
     }
   };
 
-  const addBluetoothListener = () => {
-    if (bluetoothManagerRef.current) {
-      bluetoothManagerRef.current.addBluetoothListener();
-    }
-  };
-
-  const removeBluetoothListener = () => {
-    if (bluetoothManagerRef.current) {
-      bluetoothManagerRef.current.removeBluetoothListener();
-    }
-  };
 
   const handleConnectionChange = useCallback(
     (isConnected: boolean, type: "bluetooth" | "widget") => {
       console.log(`System connection status changed: ${isConnected}, type: ${type}`);
-      setIsSystemConnected(isConnected); // 시스템 연결 상태 업데이트
-
-      // GUI 상태 업데이트
+      setIsSystemConnected(isConnected);
       if (isConnected) {
         setGuiIsConnected(true);
+        if (type === "bluetooth") setIsBluetoothConnected(true);
+        if (type === "widget") setIsWidgetConnected(true);
       } else {
         setTimeout(() => {
-          setGuiIsConnected(false); // 타임아웃 후 GUI 상태 업데이트
-        }, 1000); // 사용자 경험을 위해 약간의 지연 추가
+          setGuiIsConnected(false);
+          if (type === "bluetooth") setIsBluetoothConnected(false);
+          if (type === "widget") setIsWidgetConnected(false);
+        }, 1000);
       }
     },
     []
   );
+
+
 
   useEffect(() => {
     loadConfig();
@@ -327,11 +337,12 @@ function App() {
       const handleGuiConnectionChange = (isConnected: boolean) => {
         console.log(`GUI connection status changed: ${isConnected}`);
         setGuiIsConnected(isConnected);
+        // GUI connection status changed
       };
-  
+
       console.log("Adding GUI connection listener...");
       heartRateIORef.current.addGuiConnectionListener(handleGuiConnectionChange);
-  
+
       return () => {
         console.log("Removing GUI connection listener...");
         heartRateIORef.current?.removeGuiConnectionListener(handleGuiConnectionChange);
@@ -354,16 +365,20 @@ function App() {
               </span>
             </div>
             <ConnectionControls
+              ref={connectionControlsRef}
               tempConfig={config as Config}
               reconnect={reconnect}
+              guiIsConnected={guiIsConnected}
               selectBluetoothDevice={selectBluetoothDevice}
               setShowSettings={setShowSettings}
               showSettings={showSettings}
               isWidgetMode={config?.mode === "widget"}
               isBluetoothConnected={isBluetoothConnected}
-              addBluetoothListener={addBluetoothListener}
-              removeBluetoothListener={removeBluetoothListener}
               connectToDevice={connectToDevice}
+              isScanning={isScanning}
+              setIsScanning={setIsScanning}
+              isReconnecting={isReconnecting}
+              isConnecting={isConnecting}
             />
           </div>
 

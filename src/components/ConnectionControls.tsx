@@ -1,8 +1,9 @@
 import { Bluetooth, RefreshCw, Settings } from "lucide-react";
-import React, { useEffect } from "react";
+import React, { useEffect, forwardRef, useImperativeHandle } from "react";
 import { Config } from "../types";
 
 interface Props {
+  handleReconnect?: () => Promise<void>;
   tempConfig: Config;
   reconnect: () => Promise<void>;
   selectBluetoothDevice: () => Promise<[string, string][]>;
@@ -10,31 +11,64 @@ interface Props {
   showSettings: boolean;
   isWidgetMode: boolean;
   isBluetoothConnected: boolean; // Bluetooth 연결 상태
-  addBluetoothListener: () => void; // Bluetooth 리스너 추가
-  removeBluetoothListener: () => void; // Bluetooth 리스너 제거
   connectToDevice: (deviceId: string) => Promise<void>; // Bluetooth 장치 연결
+  isScanning?: boolean;
+  setIsScanning: React.Dispatch<React.SetStateAction<boolean>>;
+  isReconnecting?: boolean;
+  isConnecting?: boolean;
+  scanAndConnectBluetoothDevice?: (deviceId?: string) => Promise<void>;
+  canReconnect?: boolean;
+  guiIsConnected: boolean; // GUI 연결 상태
 }
 
-export default function ConnectionControls({
-  reconnect,
-  selectBluetoothDevice,
-  setShowSettings,
-  showSettings,
-  isWidgetMode,
-  isBluetoothConnected,
-  addBluetoothListener,
-  removeBluetoothListener,
-  tempConfig,
-  connectToDevice,
-}: Props) {
-  const [isLoading, setIsLoading] = React.useState(false);
+const ConnectionControls = forwardRef<{ handleReconnect: () => Promise<void> }, Props>((
+  {
+    reconnect,
+    selectBluetoothDevice,
+    setShowSettings,
+    showSettings,
+    isWidgetMode,
+    tempConfig,
+    connectToDevice,
+    isReconnecting = false,
+    isConnecting = false,
+    guiIsConnected,
+  }: Props,
+  ref
+) => {
+  const [isLoading, setIsLoading] = React.useState(false); // 로컬 즉시 피드백용
   const [error, setError] = React.useState<string | null>(null);
 
   const handleReconnect = async () => {
     setIsLoading(true);
     setError(null);
+
     try {
-      await reconnect();
+      if (isWidgetMode) {
+        // 위젯 모드일 때는 일반 재접속 함수 호출
+        await reconnect();
+      } else {
+        // 블루투스 모드일 때
+        let found = false;
+        while (!found) {
+          // 5초간 스캔
+          const scanEnd = Date.now() + 5000;
+          while (Date.now() < scanEnd) {
+            const devices: [string, string][] = await selectBluetoothDevice();
+            const targetDevice = devices.find(([id]) => id === tempConfig.bluetooth_device_id);
+            if (targetDevice) {
+              await connectToDevice(targetDevice[0]);
+              found = true;
+              break;
+            }
+            await new Promise(res => setTimeout(res, 1000));
+          }
+          // 5초 동안 못 찾으면 다시 반복
+          if (!found) {
+            console.log("Saved device not found, continuing scan...");
+          }
+        }
+      }
       console.log("Reconnection successful");
     } catch (err) {
       console.error("Reconnect failed:", err);
@@ -44,79 +78,24 @@ export default function ConnectionControls({
     }
   };
 
-  const handleSelectBluetoothDevice = async () => {
-    if (isBluetoothConnected) {
-      console.log("Device is already connected. Cancelling scan.");
-      return; // 이미 연결되어 있으면 작업 취소
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      console.log("Starting periodic Bluetooth device scan...");
-      const intervalId = setInterval(async () => {
-        try {
-          const devices: [string, string][] = await selectBluetoothDevice();
-          console.log("Scanned devices:", devices);
-
-          // 저장된 Bluetooth ID와 일치하는 장치 검색
-          const targetDevice = devices.find(([id]) => id === tempConfig.bluetooth_device_id);
-
-          if (targetDevice) {
-            console.log(`Target device found: ${targetDevice[1]} (${targetDevice[0]})`);
-            clearInterval(intervalId); // 검색 종료
-            await connectToDevice(targetDevice[0]); // 해당 장치에 연결
-          }
-        } catch (scanError) {
-          console.error("Error during Bluetooth scan:", scanError);
-        }
-      }, 1000); // 1초마다 검색
-    } catch (err) {
-      console.error("Bluetooth selection failed:", err);
-      setError("Failed to select Bluetooth device.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Bluetooth 연결 상태에 따라 리스너 관리
-  useEffect(() => {
-    if (isBluetoothConnected) {
-      console.log("Bluetooth connected. Adding listener...");
-      addBluetoothListener();
-    } 
-  }, [isBluetoothConnected, addBluetoothListener]);
+  // 외부에서 handleReconnect를 사용할 수 있도록 노출
+  useImperativeHandle(ref, () => ({
+    handleReconnect
+  }));
 
   return (
     <div className="flex items-center gap-1">
-      {/* Reconnect 버튼 */}
+      {/* Reconnect 버튼만 남김 */}
       <button
         onClick={handleReconnect}
         className={`flex items-center justify-center rounded-md p-1 ${
-          isBluetoothConnected || isLoading
+          isLoading || isReconnecting || isConnecting || guiIsConnected
             ? "bg-gray-300 cursor-not-allowed"
             : "bg-blue-500 hover:bg-blue-600"
         }`}
-        disabled={isBluetoothConnected || isLoading}
+        disabled={isLoading || isReconnecting || isConnecting || guiIsConnected}
       >
-        <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
-      </button>
-
-      {/* Bluetooth 스캔 버튼 */}
-      <button
-        onClick={handleSelectBluetoothDevice}
-        className={`flex items-center justify-center rounded-md p-1 text-white transition-colors ${
-          isWidgetMode
-            ? "bg-gray-300 cursor-not-allowed"
-            : isLoading
-            ? "bg-blue-500 opacity-50 cursor-not-allowed"
-            : "bg-blue-500 hover:bg-blue-600"
-        }`}
-        disabled={isWidgetMode || isLoading} // isWidgetMode가 true일 때 비활성화
-        aria-label="Scan Bluetooth Devices"
-      >
-        <Bluetooth className="h-3.5 w-3.5" />
+        <RefreshCw className={`h-3.5 w-3.5 ${isLoading || isReconnecting || isConnecting ? "animate-spin" : ""}`} />
       </button>
 
       {/* 설정 버튼 */}
@@ -136,4 +115,6 @@ export default function ConnectionControls({
       )}
     </div>
   );
-}
+});
+
+export default ConnectionControls;

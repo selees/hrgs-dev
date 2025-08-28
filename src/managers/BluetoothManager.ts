@@ -46,22 +46,14 @@ export class BluetoothManager {
     try {
       console.log(`Attempting to connect to Bluetooth device: ${deviceId}`);
       await invoke("connect_bluetooth", { deviceId });
-      this.currentDeviceId = deviceId; // 현재 연결된 장치 ID 저장
+      this.currentDeviceId = deviceId;
       this.heartRateIO.setConnected(true, "bluetooth");
-
-      if (this.unlistenHandler) {
-        console.log("Removing previous event listener...");
-        await this.unlistenHandler();
-        this.unlistenHandler = null;
-      }
-
-      this.unlistenHandler = await listen<number>("heart_rate_update", (event: Event<number>) => {
-        console.log("Heart rate update received:", event.payload);
-        this.heartRateIO.updateHeartRate(event.payload); // 심박수 업데이트
-      });
+      this.removeBluetoothListener(); // 기존 리스너 제거
+      this.addBluetoothListener();    // 새 리스너 추가
     } catch (error) {
       console.error(`Failed to connect to device: ${deviceId}`, error);
       this.heartRateIO.setConnected(false, "bluetooth");
+      throw error;
     }
   }
 
@@ -75,6 +67,7 @@ export class BluetoothManager {
       console.log(`Disconnecting from Bluetooth device: ${this.currentDeviceId}`);
       await invoke("disconnect_bluetooth", { deviceId: this.currentDeviceId });
       await this.cleanup();
+      this.removeBluetoothListener(); // 연결 해제 시 리스너 제거
       this.currentDeviceId = null;
       this.heartRateIO.setConnected(false, "bluetooth");
     } catch (error) {
@@ -83,19 +76,12 @@ export class BluetoothManager {
   }
 
   private async cleanup(): Promise<void> {
-    if (this.unlistenHandler) {
-      console.log("Cleaning up previous Bluetooth event listeners...");
-      await this.unlistenHandler();
-      this.unlistenHandler = null;
-    }
+  // cleanup에서 리스너 제거하지 않음. (removeBluetoothListener에서만 관리)
   }
 
   addBluetoothListener(): void {
-    if (this.unlistenHandler) {
-      console.warn("Bluetooth listener already exists. Skipping addition...");
-      return; // 중복 추가 방지
-    }
-
+    // 항상 기존 리스너 제거 후 새로 등록
+    this.removeBluetoothListener();
     listen<number>("heart_rate_update", (event: Event<number>) => {
       console.log("Heart rate update received:", event.payload);
       this.heartRateIO.updateHeartRate(event.payload);

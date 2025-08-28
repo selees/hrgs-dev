@@ -8,10 +8,10 @@ pub struct BluetoothState {
 }
 
 impl BluetoothState {
-    pub fn new() -> Self {
+    /*pub fn new() -> Self {
         BluetoothState {
             devices: Arc::new(Mutex::new(Vec::new())),
             connected_device: Arc::new(Mutex::new(None)),
         }
-    }
+    }*/
 }
