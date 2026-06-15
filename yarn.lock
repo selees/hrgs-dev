@@ -1776,6 +1776,11 @@
   resolved "https://registry.yarnpkg.com/@tauri-apps/api/-/api-2.4.0.tgz#1b93976a129383ad914e979402431a63045c6329"
   integrity sha512-F1zXTsmwcCp+ocg6fbzD/YL0OHeSG1eynCag1UNlX2tD5+dlXy7eRbTu9cAcscPjcR7Nix7by2wiv/+VfWUieg==
 
+"@tauri-apps/api@^2.11.0":
+  version "2.11.0"
+  resolved "https://registry.yarnpkg.com/@tauri-apps/api/-/api-2.11.0.tgz#00fb69996010178a5153798d4a84f6fe3a1e1182"
+  integrity sha512-7CinYODhky9lmO23xHnUFv0Xt43fbtWMyxZcLcRBlFkcgXKuEirBvHpmtJ89YMhyeGcq20Wuc47Fa4XjyniywA==
+
 "@tauri-apps/cli-darwin-arm64@2.4.0":
   version "2.4.0"
   resolved "https://registry.yarnpkg.com/@tauri-apps/cli-darwin-arm64/-/cli-darwin-arm64-2.4.0.tgz#f727421a1a41538ba046faf98fb24e7703418e0b"
@@ -1848,12 +1853,19 @@
     "@tauri-apps/cli-win32-ia32-msvc" "2.4.0"
     "@tauri-apps/cli-win32-x64-msvc" "2.4.0"
 
-"@tauri-apps/plugin-http@^2.0.0":
-  version "2.4.3"
-  resolved "https://registry.yarnpkg.com/@tauri-apps/plugin-http/-/plugin-http-2.4.3.tgz#95c2c580929e3bc436ea5debd86980c7024fd05c"
-  integrity sha512-Us8X+FikzpaZRNr4kH4HLwyXascHbM42p6LxAqRTQnHPrrqp1usaH4vxWAZalPvTbHJ3gBEMJPHusFJgtjGJjA==
+"@tauri-apps/plugin-http@^2.4.2":
+  version "2.5.9"
+  resolved "https://registry.yarnpkg.com/@tauri-apps/plugin-http/-/plugin-http-2.5.9.tgz#f612a86239b95f6b2d5d211e26d512176c9f490b"
+  integrity sha512-lCiY0+vs4HvIUSvZrBs8TC3TiCB0MOPRmiUjTq4prW7SlcJE2jdLeT6KBsJrT9Tlplufl7W1pY6SFAO3gCWxDA==
   dependencies:
-    "@tauri-apps/api" "^2.0.0"
+    "@tauri-apps/api" "^2.11.0"
+
+"@tauri-apps/plugin-opener@^2.5.4":
+  version "2.5.4"
+  resolved "https://registry.yarnpkg.com/@tauri-apps/plugin-opener/-/plugin-opener-2.5.4.tgz#b37883e4d36125b8c5a0c74f683395958a65bd7d"
+  integrity sha512-1HnPkb+AmgO29HBazm4uPLKB+r7zzcTBW1d0fyYp1uP+jwtpoiNDGKMMzz58SFp49nOIrxdE3aUJtT57lfO9CQ==
+  dependencies:
+    "@tauri-apps/api" "^2.11.0"
 
 "@tauri-apps/plugin-websocket@~2":
   version "2.3.0"

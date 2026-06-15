@@ -1,5 +1,4 @@
-import { fetch } from "@tauri-apps/plugin-http";
-import { v4 as uuidv4 } from "uuid";
+import { invoke } from "@tauri-apps/api/core";
 import { HeartRateInputOutput } from "./HeartRateInputOutput";
 import { Config } from "../types";
 
@@ -11,6 +10,10 @@ export class WebSocketManager {
   constructor(config: Config, heartRateIO: HeartRateInputOutput) {
     this.config = config;
     this.heartRateIO = heartRateIO;
+  }
+
+  updateConfig(config: Config): void {
+    this.config = config;
   }
 
   async connect(): Promise<void> {
@@ -59,30 +62,15 @@ export class WebSocketManager {
 
   // WebSocket URL 가져오기
   private async getWebSocketUrl(widgetId: string): Promise<string> {
-    const requestId = uuidv4();
-
-    const response = await fetch("https://api.stromno.com/v1/api/public/rpc", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        id: requestId,
-        jsonrpc: "2.0",
-        method: "getWidget",
-        params: {
-          widgetId,
-        },
-      }),
-    });
-
-    const responseData = await response.json();
-
-    if (response.status !== 200 || responseData.error) {
-      console.error("Failed to fetch WebSocket URL:", responseData.error || response.statusText);
+    try {
+      const url: string = await invoke("get_websocket_url", { widgetId });
+      if (!url) {
+        console.error("Failed to fetch WebSocket URL: Returned empty string");
+      }
+      return url;
+    } catch (error) {
+      console.error("Error fetching WebSocket URL:", error);
       return "";
     }
-
-    return responseData.result.ramielUrl;
   }
 }

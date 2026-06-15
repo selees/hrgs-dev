@@ -1,9 +1,10 @@
 import { useDispatch, useSelector } from "react-redux";
 import { setConfig } from "../store";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Config } from "../types";
 import { RootState } from "../store";
-import { Save, X } from "lucide-react";
+import { Save, ChevronLeft, Github, Twitter } from "lucide-react";
 import React from "react";
 
 interface Props {
@@ -69,7 +70,16 @@ export default function SettingsPanel({
     setShowSettings(false);
   };
 
+  const handleOpenUrl = async (url: string) => {
+    try {
+      await openUrl(url);
+    } catch (error) {
+      console.error("Failed to open URL:", error);
+    }
+  };
+
   if (isLoadingConfig) {
+
     return (
       <div className="bg-white dark:bg-gray-800 h-full p-3 flex items-center justify-center">
         <p className="text-gray-800 dark:text-white">Loading...</p>
@@ -80,14 +90,40 @@ export default function SettingsPanel({
   return (
     <div className="bg-white dark:bg-gray-800 h-full p-3 overflow-y-auto">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold text-gray-800 dark:text-white">Settings</h2>
-        <button
-          onClick={handleBack}
-          className="rounded-md bg-gray-200 p-1 text-gray-700 transition-colors hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
-          aria-label="Close Settings"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleBack}
+            className="rounded-md p-1 text-gray-500 hover:text-gray-800 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-700 transition-colors"
+            aria-label="Back"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <h2 className="text-sm font-semibold text-gray-800 dark:text-white">Settings</h2>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleOpenUrl("https://github.com/selees/hrgs-dev");
+            }}
+            className="text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white transition-colors"
+            title="GitHub"
+          >
+            <Github className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleOpenUrl("https://x.com/selees824_vrc");
+            }}
+            className="text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white transition-colors"
+            title="X (Twitter)"
+          >
+            <Twitter className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
       {config ? (
         <div className="grid gap-2">
@@ -136,7 +172,7 @@ export default function SettingsPanel({
           {/* 위젯 모드 UI */}
           {config.mode === "widget" && (
             <div className="space-y-0.5">
-              <label className="text-xs font-medium text-gray-700 dark:text-gray-300">Widget ID</label>
+              <label className="text-xs font-medium text-gray-700 dark:text-gray-300">Widget ID (Pulsoid or HypeRate)</label>
               <input
                 type="text"
                 value={config.widget_id}

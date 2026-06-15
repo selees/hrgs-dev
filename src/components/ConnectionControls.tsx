@@ -38,6 +38,14 @@ const ConnectionControls = forwardRef<{ handleReconnect: () => Promise<void> }, 
 ) => {
   const [isLoading, setIsLoading] = React.useState(false); // 로컬 즉시 피드백용
   const [error, setError] = React.useState<string | null>(null);
+  const isMounted = React.useRef(true);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
 
   const handleReconnect = async () => {
     setIsLoading(true);
@@ -50,10 +58,10 @@ const ConnectionControls = forwardRef<{ handleReconnect: () => Promise<void> }, 
       } else {
         // 블루투스 모드일 때
         let found = false;
-        while (!found) {
+        while (!found && isMounted.current) {
           // 5초간 스캔
           const scanEnd = Date.now() + 5000;
-          while (Date.now() < scanEnd) {
+          while (Date.now() < scanEnd && isMounted.current) {
             const devices: [string, string][] = await selectBluetoothDevice();
             const targetDevice = devices.find(([id]) => id === tempConfig.bluetooth_device_id);
             if (targetDevice) {
@@ -64,17 +72,23 @@ const ConnectionControls = forwardRef<{ handleReconnect: () => Promise<void> }, 
             await new Promise(res => setTimeout(res, 1000));
           }
           // 5초 동안 못 찾으면 다시 반복
-          if (!found) {
+          if (!found && isMounted.current) {
             console.log("Saved device not found, continuing scan...");
           }
         }
       }
-      console.log("Reconnection successful");
+      if (isMounted.current) {
+        console.log("Reconnection successful or stopped");
+      }
     } catch (err) {
-      console.error("Reconnect failed:", err);
-      setError(err instanceof Error ? err.message : "Reconnection failed.");
+      if (isMounted.current) {
+        console.error("Reconnect failed:", err);
+        setError(err instanceof Error ? err.message : "Reconnection failed.");
+      }
     } finally {
-      setIsLoading(false);
+      if (isMounted.current) {
+        setIsLoading(false);
+      }
     }
   };
 

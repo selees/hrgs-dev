@@ -10,6 +10,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { HeartRateInputOutput } from "./managers/HeartRateInputOutput";
 import { BluetoothManager } from "./managers/BluetoothManager";
 import { WebSocketManager } from "./managers/websocket";
+import { HyperateManager } from "./managers/HyperateManager";
 
 function App() {
   const dispatch = useDispatch();
@@ -32,6 +33,7 @@ function App() {
   const heartRateIORef = useRef<HeartRateInputOutput | null>(null);
   const bluetoothManagerRef = useRef<BluetoothManager | null>(null);
   const webSocketManagerRef = useRef<WebSocketManager | null>(null);
+  const hyperateManagerRef = useRef<HyperateManager | null>(null);
   const connectionControlsRef = useRef<{ handleReconnect: () => Promise<void> }>(null);
 
   const loadConfig = async () => {
@@ -73,10 +75,10 @@ function App() {
       // 설정된 모드에 따라 연결 시도
       if (finalConfig.mode === "widget") {
         console.log("Config mode is 'widget', initiating reconnect with loaded config...");
-        await reconnectWithConfig(finalConfig);
+        reconnectWithConfig(finalConfig).catch(console.error);
       } else if (finalConfig.mode === "bluetooth" && finalConfig.bluetooth_device_id) {
         console.log("Config mode is 'bluetooth', initiating reconnect with loaded config...");
-        await reconnectWithConfig(finalConfig);
+        reconnectWithConfig(finalConfig).catch(console.error);
       }
     } catch (error) {
       console.error("Failed to load settings:", error);
@@ -108,26 +110,57 @@ function App() {
       heartRateIORef.current.updateConfig(config);
     }
   
-    // BluetoothManager 초기화
-    if (!bluetoothManagerRef.current) {
-      if (!heartRateIORef.current) {
-        console.error("HeartRateInputOutput is not initialized");
-        return;
+    if (config.mode === "bluetooth") {
+      if (!bluetoothManagerRef.current) {
+        bluetoothManagerRef.current = new BluetoothManager(config, heartRateIORef.current);
+      } else {
+        bluetoothManagerRef.current.updateConfig(config);
       }
-      bluetoothManagerRef.current = new BluetoothManager(config, heartRateIORef.current);
-    } else {
-      bluetoothManagerRef.current.updateConfig(config);
-    }
-  
-    // WebSocketManager 초기화
-    if (!webSocketManagerRef.current) {
-      if (!heartRateIORef.current) {
-        console.error("HeartRateInputOutput is not initialized");
-        return;
+      
+      // 위젯 모듈 캐시 정리
+      if (webSocketManagerRef.current) {
+        webSocketManagerRef.current.disconnect();
+        webSocketManagerRef.current = null;
       }
-      webSocketManagerRef.current = new WebSocketManager(config, heartRateIORef.current);
-    } else {
-      heartRateIORef.current.updateConfig(config);
+      if (hyperateManagerRef.current) {
+        hyperateManagerRef.current.disconnect();
+        hyperateManagerRef.current = null;
+      }
+    } else if (config.mode === "widget") {
+      // HypeRate ID vs Pulsoid ID 구분
+      const isHyperate = config.widget_id && config.widget_id.length <= 10 && !config.widget_id.includes("-");
+      
+      if (isHyperate) {
+        if (!hyperateManagerRef.current) {
+          hyperateManagerRef.current = new HyperateManager(config, heartRateIORef.current);
+        } else {
+          hyperateManagerRef.current.updateConfig(config);
+        }
+        
+        // 펄소이드 모듈 캐시 정리
+        if (webSocketManagerRef.current) {
+          webSocketManagerRef.current.disconnect();
+          webSocketManagerRef.current = null;
+        }
+      } else {
+        if (!webSocketManagerRef.current) {
+          webSocketManagerRef.current = new WebSocketManager(config, heartRateIORef.current);
+        } else {
+          webSocketManagerRef.current.updateConfig(config);
+        }
+        
+        // HypeRate 모듈 캐시 정리
+        if (hyperateManagerRef.current) {
+          hyperateManagerRef.current.disconnect();
+          hyperateManagerRef.current = null;
+        }
+      }
+
+      // 블루투스 모듈 캐시 정리
+      if (bluetoothManagerRef.current) {
+        bluetoothManagerRef.current.disconnect();
+        bluetoothManagerRef.current = null;
+      }
     }
   };
 
@@ -139,13 +172,18 @@ function App() {
           console.error("Widget ID is not configured");
           return;
         }
-        if (webSocketManagerRef.current) {
-          console.log("Reconnecting to WebSocket...");
-          await webSocketManagerRef.current.connect();
-          setIsWidgetConnected(isConnected);
-          if (isConnected && heartRateIORef.current) {
-            console.log("Setting HeartRateInputOutput to widget mode connected");
-            heartRateIORef.current.setConnected(true, "widget");
+        
+        // HypeRate ID vs Pulsoid ID 구분 (HypeRate는 대체로 7자리 또는 하이픈 없음)
+        if (localConfig.widget_id.length <= 10 && !localConfig.widget_id.includes("-")) {
+          if (hyperateManagerRef.current) {
+            console.log("Reconnecting to HypeRate WebSocket...");
+            await hyperateManagerRef.current.connect();
+          }
+        } else {
+          if (webSocketManagerRef.current) {
+            console.log("Reconnecting to Pulsoid WebSocket...");
+            await webSocketManagerRef.current.connect();
+            // setIsWidgetConnected is handled via event listener
           }
         }
       } else if (localConfig.mode === "bluetooth") {
@@ -169,6 +207,13 @@ function App() {
       if (webSocketManagerRef.current) {
         console.log("Disconnecting WebSocket...");
         webSocketManagerRef.current.disconnect();
+        setIsWidgetConnected(false);
+      }
+
+      if (hyperateManagerRef.current) {
+        console.log("Disconnecting HypeRate WebSocket...");
+        hyperateManagerRef.current.disconnect();
+        // Uses the same widget status
         setIsWidgetConnected(false);
       }
   
@@ -240,9 +285,9 @@ function App() {
   
       await disconnectAll();
   
-      const newConfig = {
+      const newConfig: Config = {
         ...config,
-        mode: newMode,
+        mode: newMode as "bluetooth" | "widget",
       };
   
       await invoke("save_config", { config: newConfig });
@@ -253,7 +298,10 @@ function App() {
         heartRateIORef.current.setConnected(false, currentMode as "bluetooth" | "widget");
       }
   
-      await reconnectWithConfig(newConfig);
+      // 최신 config를 바탕으로 매니저 초기화 및 불필요한 매니저 제거
+      initializeManagers(newConfig);
+
+      reconnectWithConfig(newConfig).catch(console.error);
     } catch (error) {
       console.error("Failed to toggle mode:", error);
       setIsBluetoothConnected(false);
@@ -278,6 +326,9 @@ function App() {
 
       // 기존 연결 종료 및 리스너 정리
       await disconnectAll();
+
+      // 최신 config를 바탕으로 매니저 초기화 및 불필요한 매니저 제거
+      initializeManagers(config);
 
       // 새로운 연결 수행
       await reconnectWithConfig(config);

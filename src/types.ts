@@ -1,5 +1,5 @@
 export interface Config {
-    mode: string;
+    mode: "bluetooth" | "widget";
     widget_id: string;
     max_hr: number;
     osc_ip: string;

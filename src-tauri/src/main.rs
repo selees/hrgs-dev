@@ -49,7 +49,11 @@ async fn load_config() -> Result<Config, String> {
 
     match fs::read_to_string(&config_path) {
         Ok(json) => {
-            let config: Config = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+            let mut config: Config = serde_json::from_str(&json).unwrap_or_default();
+            // In case of parsing old config without hyperate_id
+            if config.mode.is_empty() {
+                config.mode = "bluetooth".to_string();
+            }
             Ok(config)
         }
         Err(_) => {
@@ -85,6 +89,7 @@ struct GetWidgetResponse {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct RamielUrlResult {
+    #[serde(rename = "ramielUrl")]
     ramiel_url: String,
 }
 
@@ -115,7 +120,7 @@ async fn get_websocket_url(widget_id: String) -> Result<String, String> {
     let response_data: GetWidgetResponse = response.json().await.map_err(|e| e.to_string())?;
 
     if response_data.error.is_some() {
-        return Ok("".to_string());
+        return Err(format!("API Error: {:?}", response_data.error.unwrap()));
     }
 
     Ok(response_data
@@ -145,6 +150,7 @@ fn main() {
             load_config
         ])
         .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_opener::init())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

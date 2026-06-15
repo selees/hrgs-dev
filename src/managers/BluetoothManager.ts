@@ -8,6 +8,7 @@ export class BluetoothManager {
   private config: Config;
   private heartRateIO: HeartRateInputOutput;
   private unlistenHandler: (() => void) | null = null;
+  private disconnectUnlistenHandler: (() => void) | null = null;
   private currentDeviceId: string | null = null;
 
   constructor(config: Config, heartRateIO: HeartRateInputOutput) {
@@ -90,16 +91,27 @@ export class BluetoothManager {
     }).catch((error) => {
       console.error("Failed to add Bluetooth listener:", error);
     });
+
+    listen<boolean>("bluetooth_disconnected", (event: Event<boolean>) => {
+      console.log("Bluetooth disconnected event received from backend.");
+      this.currentDeviceId = null;
+      this.heartRateIO.setConnected(false, "bluetooth");
+    }).then((unlisten) => {
+      this.disconnectUnlistenHandler = unlisten;
+    }).catch((error) => {
+      console.error("Failed to add Bluetooth disconnect listener:", error);
+    });
   }
 
   removeBluetoothListener(): void {
-    if (!this.unlistenHandler) {
-      console.warn("No Bluetooth listener to remove. Skipping...");
-      return; // 중복 제거 방지
+    if (this.unlistenHandler) {
+      console.log("Removing Bluetooth listener...");
+      this.unlistenHandler();
+      this.unlistenHandler = null;
     }
-  
-    console.log("Removing Bluetooth listener...");
-    this.unlistenHandler();
-    this.unlistenHandler = null;
+    if (this.disconnectUnlistenHandler) {
+      this.disconnectUnlistenHandler();
+      this.disconnectUnlistenHandler = null;
+    }
   }
 }

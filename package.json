@@ -1,6 +1,6 @@
 {
   "name": "hrgs",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "license": "MIT",
   "scripts": {
     "dev": "react-scripts start",
@@ -11,6 +11,7 @@
     "@reduxjs/toolkit": "^1.9.0",
     "@tauri-apps/api": "^2.4.0",
     "@tauri-apps/plugin-http": "^2.4.2",
+    "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-websocket": "~2",
     "axios": "^1.8.4",
     "lucide-react": "^0.485.0",

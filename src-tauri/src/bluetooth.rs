@@ -104,10 +104,11 @@ pub async fn connect_bluetooth(
                 .emit("heart_rate_update", heart_rate)
                 .unwrap();
         }
-        // 스트림이 종료되면 연결 상태 초기화 (옵션)
+        // 스트림이 종료되면 연결 상태 초기화
         if let Ok(mut connected) = state_clone.connected_device.lock() {
             *connected = None;
         }
+        app_handle_clone.emit("bluetooth_disconnected", true).unwrap_or_else(|e| eprintln!("Failed to emit disconnect event: {}", e));
     });
 
     Ok(())
