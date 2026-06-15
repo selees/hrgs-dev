@@ -26,4 +26,6 @@ dist-ssr
 # Development remnants
 hyperate.html
 script.js
+release.ps1
+
 
