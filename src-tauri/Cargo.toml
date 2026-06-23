@@ -1,6 +1,6 @@
 [package]
 name = "hrgs"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 
 [dependencies]
@@ -20,6 +20,7 @@ futures = "0.3"
 futures-util = "0.3"
 uuid = { version = "1.10", features = ["v4"] }
 directories = "5.0"
+mdns-sd = "0.20.0"
 
 [build-dependencies]
 tauri-build = { version = "2.0.0", features = [] }

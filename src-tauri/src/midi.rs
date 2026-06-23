@@ -91,3 +91,17 @@ pub async fn send_midi_heartrate(
 
     Ok(())
 }
+
+#[tauri::command]
+pub fn check_midi_port(port_name: String) -> Result<bool, String> {
+    if port_name.is_empty() || port_name.to_lowercase() == "none" {
+        return Ok(false);
+    }
+    let midi_out = MidiOutput::new("MIDI Port Checker").map_err(|e| e.to_string())?;
+    let ports = midi_out.ports();
+    let found = ports.iter().any(|p| {
+        let name = midi_out.port_name(p).unwrap_or_default().to_lowercase();
+        name.contains(&port_name.to_lowercase())
+    });
+    Ok(found)
+}

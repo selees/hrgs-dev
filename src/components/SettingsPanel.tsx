@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Config } from "../types";
 import { RootState } from "../store";
-import { Save, ChevronLeft, Github, Twitter } from "lucide-react";
+import { Save, ChevronLeft, Github, Twitter, Wifi } from "lucide-react";
 import React from "react";
 
 interface Props {
@@ -24,11 +24,23 @@ export default function SettingsPanel({
   const config = useSelector((state: RootState) => state.app.config);
   const [bluetoothDevices, setBluetoothDevices] = React.useState<[string, string][]>(initialDevices);
 
-  const updateTempConfig = (key: keyof Config, value: string | number) => {
+  const updateTempConfig = (key: keyof Config, value: string | number | boolean) => {
     if (config) {
+      let finalValue = value;
+      if (key === "widget_id" && typeof value === "string") {
+        let clean = value.trim();
+        if (clean.includes("hyperate.io/")) {
+          const parts = clean.split("hyperate.io/");
+          clean = parts[parts.length - 1].split("/")[0].split("?")[0];
+        } else if (clean.includes("pulsoid.net/")) {
+          const parts = clean.split("/");
+          clean = parts[parts.length - 1].split("?")[0];
+        }
+        finalValue = clean;
+      }
       const updatedConfig = {
         ...config,
-        [key]: typeof value === "string" && typeof config[key] === "number" ? Number(value) : value,
+        [key]: typeof value === "string" && typeof config[key] === "number" ? Number(value) : finalValue,
       };
       dispatch(setConfig(updatedConfig));
     } else {
@@ -59,6 +71,7 @@ export default function SettingsPanel({
       setBluetoothDevices(devices);
       if (devices.length > 0 && !config?.bluetooth_device_id) {
         updateTempConfig("bluetooth_device_id", devices[0][0]);
+        updateTempConfig("bluetooth_device_name", devices[0][1]);
       }
     } catch (error) {
       console.error("Bluetooth scan failed:", error);
@@ -148,7 +161,12 @@ export default function SettingsPanel({
               <div className="flex items-center gap-2">
                 <select
                   value={config.bluetooth_device_id || ""}
-                  onChange={(e) => updateTempConfig("bluetooth_device_id", e.target.value)}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    updateTempConfig("bluetooth_device_id", id);
+                    const dev = bluetoothDevices.find(([dId]) => dId === id);
+                    updateTempConfig("bluetooth_device_name", dev ? dev[1] : "");
+                  }}
                   onClick={(e) => e.stopPropagation()}
                   className="w-full rounded-md border border-gray-300 p-1 text-xs text-gray-800 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
                 >
@@ -207,7 +225,45 @@ export default function SettingsPanel({
 
           {/* OSC Settings Section */}
           <div className="mt-2 border-t border-gray-200 dark:border-gray-700 pt-2">
-            <h3 className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OSC Settings</h3>
+            <div className="flex items-center justify-between mb-1.5">
+              <h3 className="text-xs font-medium text-gray-700 dark:text-gray-300">OSC Settings</h3>
+            </div>
+
+            {/* Toggle Mode */}
+            <div className="space-y-0.5 mb-1.5">
+              <label className="text-xs font-medium text-gray-700 dark:text-gray-300">Mode</label>
+              <div className="flex rounded-md bg-gray-100 dark:bg-gray-700 p-0.5 w-full">
+                <button
+                  type="button"
+                  onClick={() => updateTempConfig("osc_auto", true)}
+                  className={`flex-1 rounded py-0.5 text-[10px] font-medium transition-colors ${
+                    config.osc_auto
+                      ? "bg-blue-500 text-white shadow-sm"
+                      : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                  }`}
+                >
+                  Auto
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateTempConfig("osc_auto", false)}
+                  className={`flex-1 rounded py-0.5 text-[10px] font-medium transition-colors ${
+                    !config.osc_auto
+                      ? "bg-blue-500 text-white shadow-sm"
+                      : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                  }`}
+                >
+                  Manual
+                </button>
+              </div>
+            </div>
+
+            {/* Status text (only when in Auto mode) */}
+            {config.osc_auto && (
+              <div className="text-[9px] text-blue-500 dark:text-blue-400 font-medium mb-1.5 px-1 py-0.5 bg-blue-50 dark:bg-blue-900/30 rounded">
+                Auto mode: Automatically detecting VRChat OSC port.
+              </div>
+            )}
             
             <div className="space-y-0.5 mb-1">
               <label className="text-xs font-medium text-gray-700 dark:text-gray-300">OSC IP</label>
@@ -215,7 +271,12 @@ export default function SettingsPanel({
                 type="text"
                 value={config.osc_ip}
                 onChange={(e) => updateTempConfig("osc_ip", e.target.value)}
-                className="w-full rounded-md border border-gray-300 p-1 text-xs text-gray-800 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                disabled={config.osc_auto}
+                className={`w-full rounded-md border p-1 text-xs text-gray-800 dark:bg-gray-700 dark:text-white ${
+                  config.osc_auto 
+                    ? "border-gray-200 bg-gray-50 text-gray-400 dark:border-gray-650 dark:text-gray-500 cursor-not-allowed" 
+                    : "border-gray-300 dark:border-gray-600"
+                }`}
                 placeholder="127.0.0.1"
               />
             </div>
@@ -226,7 +287,12 @@ export default function SettingsPanel({
                 type="number"
                 value={config.osc_port}
                 onChange={(e) => updateTempConfig("osc_port", e.target.value)}
-                className="w-full rounded-md border border-gray-300 p-1 text-xs text-gray-800 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                disabled={config.osc_auto}
+                className={`w-full rounded-md border p-1 text-xs text-gray-800 dark:bg-gray-700 dark:text-white ${
+                  config.osc_auto 
+                    ? "border-gray-200 bg-gray-50 text-gray-400 dark:border-gray-650 dark:text-gray-500 cursor-not-allowed" 
+                    : "border-gray-300 dark:border-gray-600"
+                }`}
               />
             </div>
             

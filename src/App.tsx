@@ -28,7 +28,18 @@ function App() {
   const [isConnecting, setIsConnecting] = useState(false); // 장치 연결 시도 상태 (UI용)
   const [isSystemConnected, setIsSystemConnected] = useState<boolean>(false); // 시스템 연결 상태
   const [guiIsConnected, setGuiIsConnected] = useState<boolean>(false); // GUI 연결 상태
+  const [isVrcDetected, setIsVrcDetected] = useState<boolean>(false); // VRChat OSCQuery 감지 상태
+  const [isMidiActive, setIsMidiActive] = useState<boolean>(false); // MIDI 활성화 상태
   
+  const [oscRate, setOscRate] = useState<number>(0);
+  const [oscPackets, setOscPackets] = useState<number>(0);
+  const oscTimestampsRef = useRef<number[]>([]);
+  const configRef = useRef(config);
+
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
+
   // 매니저 인스턴스를 ref로 관리
   const heartRateIORef = useRef<HeartRateInputOutput | null>(null);
   const bluetoothManagerRef = useRef<BluetoothManager | null>(null);
@@ -43,8 +54,31 @@ function App() {
       let finalConfig: Config;
   
       if (loadedConfig) {
-        finalConfig = loadedConfig;
+        finalConfig = {
+          ...loadedConfig,
+          osc_auto: loadedConfig.osc_auto ?? true,
+        };
         console.log("Loaded config:", finalConfig);
+
+        // If osc_auto is enabled, attempt auto-detection of VRChat on startup
+        if (finalConfig.osc_auto) {
+          try {
+            const service: { name: string; osc_ip: string; osc_port: number } | null = await invoke("detect_vrchat_osc");
+            if (service) {
+              finalConfig.osc_ip = service.osc_ip;
+              finalConfig.osc_port = service.osc_port;
+              console.log("OSCQuery Auto-detected on startup:", service);
+              setIsVrcDetected(true);
+            } else {
+              setIsVrcDetected(false);
+            }
+          } catch (e) {
+            console.error("OSCQuery auto-detect on startup failed:", e);
+            setIsVrcDetected(false);
+          }
+        } else {
+          setIsVrcDetected(false);
+        }
       } else {
         const defaultConfig: Config = {
           mode: "bluetooth",
@@ -57,10 +91,13 @@ function App() {
           midi_port: "hroscmidi",
           timeout: 10,
           bluetooth_device_id: "",
+          bluetooth_device_name: "",
+          osc_auto: true,
         };
         await invoke("save_config", { config: defaultConfig });
         finalConfig = defaultConfig;
         console.log("Initialized default config:", finalConfig);
+        setIsVrcDetected(false);
       }
   
       // Redux 상태 업데이트
@@ -93,10 +130,13 @@ function App() {
         midi_port: "hroscmidi",
         timeout: 10,
         bluetooth_device_id: "",
+        bluetooth_device_name: "",
+        osc_auto: true,
       };
       await invoke("save_config", { config: defaultConfig });
       dispatch(setConfig(defaultConfig));
       initializeManagers(defaultConfig);
+      setIsVrcDetected(false);
     } finally {
       setIsLoadingConfig(false);
     }
@@ -109,6 +149,7 @@ function App() {
     } else {
       heartRateIORef.current.updateConfig(config);
     }
+    heartRateIORef.current.setMidiActive(isMidiActive);
   
     if (config.mode === "bluetooth") {
       if (!bluetoothManagerRef.current) {
@@ -388,7 +429,6 @@ function App() {
       const handleGuiConnectionChange = (isConnected: boolean) => {
         console.log(`GUI connection status changed: ${isConnected}`);
         setGuiIsConnected(isConnected);
-        // GUI connection status changed
       };
 
       console.log("Adding GUI connection listener...");
@@ -401,18 +441,145 @@ function App() {
     }
   }, [heartRateIORef.current]);
 
+  // 1. Calculate OSC rate and prune timestamps every second
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const threshold = now - 5000;
+      oscTimestampsRef.current = oscTimestampsRef.current.filter(t => t > threshold);
+      const rate = oscTimestampsRef.current.length / 5;
+      setOscRate(rate);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // 2. Track heart rate changes to count OSC messages
+  useEffect(() => {
+    if (heartRate > 0 && guiIsConnected) {
+      const now = Date.now();
+      oscTimestampsRef.current.push(now);
+      setOscPackets(prev => prev + 1);
+      
+      const threshold = now - 5000;
+      oscTimestampsRef.current = oscTimestampsRef.current.filter(t => t > threshold);
+      const rate = oscTimestampsRef.current.length / 5;
+      setOscRate(rate);
+    } else {
+      setOscRate(0);
+    }
+  }, [heartRate, guiIsConnected]);
+ 
+  // 2.5. Check MIDI port existence and disable it if not found when connected
+  useEffect(() => {
+    const verifyMidiPort = async () => {
+      if (!config || !config.midi_port || config.midi_port === "None" || config.midi_port === "none") {
+        setIsMidiActive(false);
+        if (heartRateIORef.current) {
+          heartRateIORef.current.setMidiActive(false);
+        }
+        return;
+      }
+      
+      try {
+        const exists = await invoke<boolean>("check_midi_port", { portName: config.midi_port });
+        setIsMidiActive(exists);
+        if (heartRateIORef.current) {
+          heartRateIORef.current.setMidiActive(exists);
+        }
+      } catch (err) {
+        console.error("Failed to check MIDI port:", err);
+        setIsMidiActive(false);
+        if (heartRateIORef.current) {
+          heartRateIORef.current.setMidiActive(false);
+        }
+      }
+    };
+
+    if (!showSettings) {
+      verifyMidiPort();
+    }
+  }, [config?.midi_port, showSettings]);
+
+  // 3. Background search for VRChat if osc_auto is true
+  useEffect(() => {
+    let intervalId: any = null;
+    let isChecking = false;
+
+    if (config?.osc_auto) {
+      if (!isVrcDetected) {
+        const checkOsc = async () => {
+          if (isChecking) return;
+          isChecking = true;
+          try {
+            const service: { name: string; osc_ip: string; osc_port: number } | null = await invoke("detect_vrchat_osc");
+            if (service) {
+              console.log("OSCQuery background detection found VRChat:", service);
+              const currentConfig = configRef.current;
+              if (currentConfig) {
+                const updatedConfig = {
+                  ...currentConfig,
+                  osc_ip: service.osc_ip,
+                  osc_port: service.osc_port,
+                };
+                dispatch(setConfig(updatedConfig));
+                await invoke("save_config", { config: updatedConfig });
+              }
+              setIsVrcDetected(true);
+              
+              // Clear interval once VRChat is detected
+              if (intervalId) {
+                clearInterval(intervalId);
+                intervalId = null;
+              }
+            }
+          } catch (err) {
+            console.error("OSCQuery background detection failed:", err);
+          } finally {
+            isChecking = false;
+          }
+        };
+
+        // Run check immediately
+        checkOsc();
+
+        // Schedule interval to run every 5 seconds until VRChat is found
+        intervalId = setInterval(checkOsc, 5000);
+      }
+    } else {
+      setIsVrcDetected(false);
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [config?.osc_auto, isVrcDetected]);
+
   const hrPercentage = config ? Math.min(100, (heartRate / config.max_hr) * 100) : 0;
   const isConnected = heartRateIORef.current?.isDeviceConnected() ?? false;
   
   return (
-    <div className="bg-gray-100 dark:bg-gray-900 w-[320px] h-[260px] overflow-hidden">
+    <div className="bg-gray-100 dark:bg-gray-900 w-[320px] h-[260px] overflow-hidden select-none">
       {!showSettings ? (
-        <div className="bg-white dark:bg-gray-800 h-full p-3">
-          <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-1">
-          <div className={`h-2 w-2 rounded-full ${guiIsConnected ? "bg-green-500" : "bg-red-500"}`}></div>
-          <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
-            {guiIsConnected ? "Connected" : "Disconnected"}
+        <div className="bg-white dark:bg-gray-800 h-full p-3 flex flex-col justify-between">
+          <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-700/50 pb-1.5">
+            {/* BLE/Widget status with mode toggle button */}
+            <div className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-600 dark:text-gray-300">
+              <span className={`h-1.5 w-1.5 rounded-full ${guiIsConnected ? "bg-green-500 animate-pulse" : "bg-red-500"}`}></span>
+              <button
+                onClick={toggleMode}
+                className="px-1 py-0.5 rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-650 text-gray-700 dark:text-gray-200 font-bold text-[9px] transition-colors uppercase cursor-pointer"
+                title="Click to toggle connection mode"
+              >
+                {config?.mode === "bluetooth" ? "BLE" : "Widget"}
+              </button>
+              <span className="truncate max-w-[130px]">
+                {guiIsConnected
+                  ? (config?.mode === "bluetooth" 
+                    ? `${config?.bluetooth_device_name || "Device"} Connected` 
+                    : `${config?.widget_id && config.widget_id.length <= 10 && !config.widget_id.includes("-") ? "HypeRate" : "Pulsoid"} Connected`)
+                  : "Disconnected"}
               </span>
             </div>
             <ConnectionControls
@@ -433,11 +600,16 @@ function App() {
             />
           </div>
 
-          <div className="flex flex-col items-center justify-center">
-            <div className="relative h-32 w-32 mb-2">
+          <div className="flex-1 flex flex-col items-center justify-center py-2">
+            <div className="relative h-36 w-36">
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-4xl font-bold text-gray-800 dark:text-white">{Math.round(heartRate)}</span>
-                <span className="text-xs text-gray-500 dark:text-gray-400">BPM</span>
+                <span className="text-4xl font-extrabold text-gray-800 dark:text-white leading-tight">{Math.round(heartRate)}</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium leading-none mb-0.5">BPM</span>
+                {config && (
+                  <span className="text-xs text-blue-500 dark:text-blue-400 font-bold mt-0.5 leading-none">
+                    {(heartRate / config.max_hr).toFixed(2)}
+                  </span>
+                )}
               </div>
               <svg className="h-full w-full" viewBox="0 0 100 100">
                 <circle
@@ -462,40 +634,44 @@ function App() {
                 />
               </svg>
             </div>
+          </div>
 
-            {config && (
-              <div className="grid w-full grid-cols-2 gap-2 mt-1">
-                <div className="rounded-lg bg-gray-100 p-2 dark:bg-gray-700">
-                  <div className="flex items-center justify-center gap-1">
-                    <Activity className="h-3 w-3 text-blue-500" />
-                    <span className="text-xs font-medium text-gray-700 dark:text-gray-300">HR %</span>
-                  </div>
-                  <p className="text-xs font-semibold text-gray-800 dark:text-white text-center">
-                    {hrPercentage.toFixed(1)}%
-                  </p>
-                </div>
-                <div className="rounded-lg bg-gray-100 p-2 dark:bg-gray-700">
-                  <div className="flex items-center justify-center gap-1">
-                    <button
-                      onClick={toggleMode}
-                      className={`flex items-center justify-center rounded-md p-1 ${
-                        config.mode === "bluetooth" ? "bg-blue-500" : "bg-gray-200"
-                      }`}
-                    >
-                      <Bluetooth
-                        className={`h-4 w-4 ${
-                          config.mode === "bluetooth" ? "text-white" : "text-gray-700"
-                        }`}
-                      />
-                    </button>
-                    <span className="text-xs font-medium text-gray-700 dark:text-gray-300">ConnectType</span>
-                  </div>
-                  <p className="text-xs font-semibold text-gray-800 dark:text-white truncate text-center">
-                    {config.mode === "widget" ? "Widget ID" : "Bluetooth"}
-                  </p>
-                </div>
-              </div>
-            )}
+          {/* OSC and MIDI Bottom Status Bar */}
+          <div className="flex items-center justify-between border-t border-gray-100 dark:border-gray-700/50 pt-1.5 text-[9px] font-semibold text-gray-500 dark:text-gray-400 select-none">
+            <div className="flex items-center gap-1">
+              <span className={`h-1.5 w-1.5 rounded-full ${
+                config?.osc_auto && !isVrcDetected
+                  ? "bg-yellow-500 animate-pulse"
+                  : guiIsConnected 
+                    ? "bg-green-500 animate-pulse" 
+                    : "bg-gray-400"
+              }`}></span>
+              <span>
+                OSC: {
+                  config?.osc_auto && !isVrcDetected
+                    ? "Wait.."
+                    : guiIsConnected 
+                      ? `Out (${config?.osc_port}/${oscRate.toFixed(1)} fps)` 
+                      : `Idle (${config?.osc_port || 9000})`
+                }
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className={`h-1.5 w-1.5 rounded-full ${
+                guiIsConnected && isMidiActive
+                  ? "bg-green-500 animate-pulse" 
+                  : "bg-gray-400"
+              }`}></span>
+              <span className="truncate max-w-[130px]">
+                MIDI: {
+                  !isMidiActive
+                    ? "Off"
+                    : guiIsConnected 
+                      ? `Out (${config?.midi_port})` 
+                      : `Idle (${config?.midi_port})`
+                }
+              </span>
+            </div>
           </div>
         </div>
       ) : (

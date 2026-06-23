@@ -19,6 +19,7 @@ export class HeartRateInputOutput {
   private timeoutId: ReturnType<typeof setTimeout> | null = null;
   private statusIntervalId: ReturnType<typeof setInterval> | null = null;
   private dispatch: AppDispatch;
+  private isMidiActive: boolean = false;
 
   constructor(config: Config, dispatch: AppDispatch) {
     this.config = config;
@@ -27,6 +28,10 @@ export class HeartRateInputOutput {
 
   updateConfig(config: Config): void {
     this.config = config;
+  }
+
+  setMidiActive(active: boolean): void {
+    this.isMidiActive = active;
   }
 
   updateHeartRate(value: number): void {
@@ -174,10 +179,12 @@ export class HeartRateInputOutput {
     if (heartRate_midi < 0) heartRate_midi = 0;
     else if (heartRate_midi > 200) heartRate_midi = 200;
 
-    invoke("send_midi_heartrate", {
-      portName: this.config.midi_port,
-      heartrate: heartRate_midi,
-    }).catch(err => console.error("Failed to send MIDI heart rate:", err));
+    if (this.isMidiActive) {
+      invoke("send_midi_heartrate", {
+        portName: this.config.midi_port,
+        heartrate: heartRate_midi,
+      }).catch(err => console.error("Failed to send MIDI heart rate:", err));
+    }
   }
 
   getHeartRate(): number {

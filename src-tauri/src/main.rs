@@ -2,6 +2,7 @@
 mod bluetooth;
 mod midi;
 mod osc;
+mod oscquery;
 mod state;
 
 use bluetooth::{connect_bluetooth, disconnect_bluetooth, scan_bluetooth_devices};
@@ -12,7 +13,8 @@ use std::fs;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid; // fs 모듈 임포트 추가
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(default)]
 struct Config {
     mode: String,
     widget_id: String,
@@ -24,6 +26,27 @@ struct Config {
     midi_port: String,
     timeout: u32,
     bluetooth_device_id: String,
+    bluetooth_device_name: String,
+    osc_auto: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            mode: "bluetooth".to_string(),
+            widget_id: "".to_string(),
+            max_hr: 200.0,
+            osc_ip: "127.0.0.1".to_string(),
+            osc_port: 9000,
+            hr_percent_address: "/avatar/parameters/hr_percent".to_string(),
+            hr_connected_address: "/avatar/parameters/hr_connected".to_string(),
+            midi_port: "hroscmidi".to_string(),
+            timeout: 10,
+            bluetooth_device_id: "".to_string(),
+            bluetooth_device_name: "".to_string(),
+            osc_auto: true,
+        }
+    }
 }
 
 #[tauri::command]
@@ -57,18 +80,7 @@ async fn load_config() -> Result<Config, String> {
             Ok(config)
         }
         Err(_) => {
-            let default_config = Config {
-                mode: "bluetooth".to_string(),
-                widget_id: "".to_string(),
-                max_hr: 200.0,
-                osc_ip: "127.0.0.1".to_string(),
-                osc_port: 9000,
-                hr_percent_address: "/avatar/parameters/hr_percent".to_string(),
-                hr_connected_address: "/avatar/parameters/hr_connected".to_string(),
-                midi_port: "hroscmidi".to_string(),
-                timeout: 10,
-                bluetooth_device_id: "".to_string(),
-            };
+            let default_config = Config::default();
 
             save_config(default_config.clone())
                 .await
@@ -146,8 +158,10 @@ fn main() {
             osc::send_osc_bool,
             midi::send_midi_note,
             midi::send_midi_heartrate,
+            midi::check_midi_port,
             save_config,
-            load_config
+            load_config,
+            oscquery::detect_vrchat_osc
         ])
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())

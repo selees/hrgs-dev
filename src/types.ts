@@ -9,4 +9,6 @@ export interface Config {
     midi_port: string;
     timeout: number;
     bluetooth_device_id: string;
+    bluetooth_device_name: string;
+    osc_auto: boolean;
   }
