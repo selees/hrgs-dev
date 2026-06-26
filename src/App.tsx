@@ -574,7 +574,7 @@ function App() {
               >
                 {config?.mode === "bluetooth" ? "BLE" : "Widget"}
               </button>
-              <span className="truncate max-w-[130px]">
+              <span className="truncate max-w-[170px]">
                 {guiIsConnected
                   ? (config?.mode === "bluetooth" 
                     ? `${config?.bluetooth_device_name || "Device"} Connected` 

@@ -24,28 +24,36 @@ export default function SettingsPanel({
   const config = useSelector((state: RootState) => state.app.config);
   const [bluetoothDevices, setBluetoothDevices] = React.useState<[string, string][]>(initialDevices);
 
-  const updateTempConfig = (key: keyof Config, value: string | number | boolean) => {
+  const updateMultipleConfigs = (updates: Partial<Config>) => {
     if (config) {
-      let finalValue = value;
-      if (key === "widget_id" && typeof value === "string") {
-        let clean = value.trim();
-        if (clean.includes("hyperate.io/")) {
-          const parts = clean.split("hyperate.io/");
-          clean = parts[parts.length - 1].split("/")[0].split("?")[0];
-        } else if (clean.includes("pulsoid.net/")) {
-          const parts = clean.split("/");
-          clean = parts[parts.length - 1].split("?")[0];
+      let updatedConfig = { ...config };
+      for (const [k, v] of Object.entries(updates)) {
+        const key = k as keyof Config;
+        let finalValue = v;
+        if (key === "widget_id" && typeof v === "string") {
+          let clean = v.trim();
+          if (clean.includes("hyperate.io/")) {
+            const parts = clean.split("hyperate.io/");
+            clean = parts[parts.length - 1].split("/")[0].split("?")[0];
+          } else if (clean.includes("pulsoid.net/")) {
+            const parts = clean.split("/");
+            clean = parts[parts.length - 1].split("?")[0];
+          }
+          finalValue = clean;
         }
-        finalValue = clean;
+        updatedConfig = {
+          ...updatedConfig,
+          [key]: typeof v === "string" && typeof config[key] === "number" ? Number(v) : finalValue,
+        };
       }
-      const updatedConfig = {
-        ...config,
-        [key]: typeof value === "string" && typeof config[key] === "number" ? Number(value) : finalValue,
-      };
       dispatch(setConfig(updatedConfig));
     } else {
       console.error("No config available to update");
     }
+  };
+
+  const updateTempConfig = (key: keyof Config, value: string | number | boolean) => {
+    updateMultipleConfigs({ [key]: value });
   };
 
   const saveConfig = async () => {
@@ -70,8 +78,10 @@ export default function SettingsPanel({
       const devices: [string, string][] = await invoke("scan_bluetooth_devices");
       setBluetoothDevices(devices);
       if (devices.length > 0 && !config?.bluetooth_device_id) {
-        updateTempConfig("bluetooth_device_id", devices[0][0]);
-        updateTempConfig("bluetooth_device_name", devices[0][1]);
+        updateMultipleConfigs({
+          bluetooth_device_id: devices[0][0],
+          bluetooth_device_name: devices[0][1],
+        });
       }
     } catch (error) {
       console.error("Bluetooth scan failed:", error);
@@ -163,11 +173,12 @@ export default function SettingsPanel({
                   value={config.bluetooth_device_id || ""}
                   onChange={(e) => {
                     const id = e.target.value;
-                    updateTempConfig("bluetooth_device_id", id);
                     const dev = bluetoothDevices.find(([dId]) => dId === id);
-                    updateTempConfig("bluetooth_device_name", dev ? dev[1] : "");
+                    updateMultipleConfigs({
+                      bluetooth_device_id: id,
+                      bluetooth_device_name: dev ? dev[1] : "",
+                    });
                   }}
-                  onClick={(e) => e.stopPropagation()}
                   className="w-full rounded-md border border-gray-300 p-1 text-xs text-gray-800 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
                 >
                   <option value="">Select Device</option>
