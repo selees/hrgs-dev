@@ -38,6 +38,9 @@ function App() {
 
   useEffect(() => {
     configRef.current = config;
+    if (config) {
+      initializeManagers(config);
+    }
   }, [config]);
 
   // 매니저 인스턴스를 ref로 관리
@@ -506,45 +509,40 @@ function App() {
     let isChecking = false;
 
     if (config?.osc_auto) {
-      if (!isVrcDetected) {
-        const checkOsc = async () => {
-          if (isChecking) return;
-          isChecking = true;
-          try {
-            const service: { name: string; osc_ip: string; osc_port: number } | null = await invoke("detect_vrchat_osc");
-            if (service) {
-              console.log("OSCQuery background detection found VRChat:", service);
-              const currentConfig = configRef.current;
-              if (currentConfig) {
-                const updatedConfig = {
-                  ...currentConfig,
-                  osc_ip: service.osc_ip,
-                  osc_port: service.osc_port,
-                };
-                dispatch(setConfig(updatedConfig));
-                await invoke("save_config", { config: updatedConfig });
-              }
-              setIsVrcDetected(true);
-              
-              // Clear interval once VRChat is detected
-              if (intervalId) {
-                clearInterval(intervalId);
-                intervalId = null;
-              }
+      const checkOsc = async () => {
+        if (isChecking) return;
+        isChecking = true;
+        try {
+          const service: { name: string; osc_ip: string; osc_port: number } | null = await invoke("detect_vrchat_osc");
+          if (service) {
+            const currentConfig = configRef.current;
+            if (currentConfig && (currentConfig.osc_ip !== service.osc_ip || currentConfig.osc_port !== service.osc_port)) {
+              console.log("OSCQuery background detection updated VRChat port/IP:", service);
+              const updatedConfig = {
+                ...currentConfig,
+                osc_ip: service.osc_ip,
+                osc_port: service.osc_port,
+              };
+              dispatch(setConfig(updatedConfig));
+              await invoke("save_config", { config: updatedConfig });
             }
-          } catch (err) {
-            console.error("OSCQuery background detection failed:", err);
-          } finally {
-            isChecking = false;
+            setIsVrcDetected(true);
+          } else {
+            setIsVrcDetected(false);
           }
-        };
+        } catch (err) {
+          console.error("OSCQuery background detection failed:", err);
+          setIsVrcDetected(false);
+        } finally {
+          isChecking = false;
+        }
+      };
 
-        // Run check immediately
-        checkOsc();
+      // Run check immediately
+      checkOsc();
 
-        // Schedule interval to run every 5 seconds until VRChat is found
-        intervalId = setInterval(checkOsc, 5000);
-      }
+      // Schedule interval to run every 5 seconds to handle VRChat restarts/state changes
+      intervalId = setInterval(checkOsc, 5000);
     } else {
       setIsVrcDetected(false);
     }
@@ -554,7 +552,7 @@ function App() {
         clearInterval(intervalId);
       }
     };
-  }, [config?.osc_auto, isVrcDetected]);
+  }, [config?.osc_auto]);
 
   const hrPercentage = config ? Math.min(100, (heartRate / config.max_hr) * 100) : 0;
   const isConnected = heartRateIORef.current?.isDeviceConnected() ?? false;
